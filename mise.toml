@@ -1,0 +1,61 @@
+[tools]
+lefthook = "latest"
+shellcheck = "latest"
+shfmt = "latest"
+
+[tasks.format]
+description = "Format Swift sources and shell scripts"
+run = [
+  "swift format format --in-place --recursive --parallel Sources Tests Package.swift scripts/*.swift",
+  "shfmt --write scripts/*.sh Assets/*.sh",
+]
+
+[tasks.lint]
+description = "Lint Swift sources and shell scripts"
+run = [
+  "swift format lint --strict --recursive --parallel Sources Tests Package.swift scripts/*.swift",
+  "shellcheck scripts/*.sh Assets/*.sh",
+  "shfmt --diff scripts/*.sh Assets/*.sh",
+]
+
+[tasks.build]
+description = "Build the release app bundle and sign it"
+run = "sh scripts/bundle.sh"
+
+[tasks."build:release"]
+description = "Build a certificate-signed, timestamped release app using ignored .env.production; does not install, notarize, or publish"
+env._.file = ".env.production"
+run = '''
+case "${SIGN_IDENTITY:-}" in
+  ""|-) echo "Set SIGN_IDENTITY to a certificate fingerprint in .env.production" >&2; exit 1 ;;
+esac
+exec sh scripts/bundle.sh
+'''
+
+[tasks."release:notarize"]
+description = "Manually upload the signed app to Apple using NOTARY_PROFILE from ignored .env.production, wait, staple, and write ZIP/SHA-256 assets in ~/Library/Caches/deltavee; does not publish or install"
+env._.file = ".env.production"
+run = "sh scripts/notarize.sh"
+
+[tasks."release:publish"]
+description = "Manually create a GitHub Release in pers0n4/deltavee and upload the validated notarized ZIP/checksum using an existing exact source tag; never creates or pushes tags"
+env._.file = ".env.production"
+run = "sh scripts/publish-release.sh"
+
+[tasks.install]
+description = "Install the app bundle and the statusline script it carries"
+depends = ["build"]
+run = "sh scripts/install.sh"
+
+
+[tasks.screenshots]
+description = "Regenerate README screenshots from fake accounts and export the app icon, overwriting files in .github/images"
+env = { DELTAVEE_SCREENSHOTS = "1" }
+run = [
+  "swift test --scratch-path ~/Library/Caches/deltavee/build --filter ReadmeScreenshotTests",
+  "\"$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool\" Assets/AppIcon.icon --export-image --output-file .github/images/app-icon.png --platform macOS --rendition Default --width 128 --height 128 --scale 2",
+]
+
+[tasks.menubar-capture]
+description = "Capture installed-app menu bar cases from fake-home instances; temporarily replace and restore desktop wallpaper; write menubar.png and menubar.txt to scratch/menubar-capture; no keyboard or mouse input"
+run = "sh scripts/menubar-capture.sh"

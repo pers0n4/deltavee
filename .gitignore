@@ -1,0 +1,16 @@
+# Build artifacts
+.build/
+*.app
+.swiftpm/
+DerivedData/
+
+# Environment files
+.env
+.env.*
+
+# Local development notes
+*.local.md
+/docs/design/
+
+# macOS
+.DS_Store

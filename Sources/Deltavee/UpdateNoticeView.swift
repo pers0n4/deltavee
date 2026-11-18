@@ -1,0 +1,64 @@
+import DeltaveeCore
+import SwiftUI
+
+/// Scrollable panel content, not a system notification. The only action opens a validated release page.
+struct UpdateNoticeView: View {
+  let state: UpdateState
+  let showsStatus: Bool
+  var body: some View {
+    let message = showsStatus ? Self.statusMessage(for: state.status) : ""
+    return VStack(alignment: .leading, spacing: 6) {
+      if let release = state.availableRelease {
+        Text("Deltavee \(release.version.description) is available")
+          .font(.callout.weight(.medium))
+          .fixedSize(horizontal: false, vertical: true)
+        Link(destination: release.releaseURL) {
+          Label("View Release on GitHub", systemImage: "arrow.up.right.square")
+        }
+        .font(.callout)
+        .accessibilityLabel("View Deltavee \(release.version.description) release on GitHub")
+        .help("Open the official release page in your browser. Download and install manually.")
+        Text("Download and install manually.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      if !message.isEmpty {
+        HStack(alignment: .top, spacing: 6) {
+          if state.status.isChecking {
+            ProgressView().controlSize(.mini).accessibilityLabel("Checking for updates")
+          }
+          Text(message)
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .fixedSize(horizontal: false, vertical: true)
+    .accessibilityElement(children: .contain)
+  }
+
+  static func statusMessage(for status: UpdateStatus) -> String {
+    switch status {
+    case .idle: "Updates have not been checked."
+    case .checking: "Checking for updates…"
+    case .current(let version): "Deltavee \(version) is up to date."
+    case .available: ""
+    case .unavailable(.configuration):
+      "Updates are unavailable in this build. Install a bundled release to check for updates."
+    case .unavailable(.noRelease):
+      "No published release is available yet. Check again later."
+    case .unavailable(.network):
+      "Couldn’t check for updates. Check your connection and try again."
+    case .unavailable(.http(429)):
+      "GitHub is limiting update checks. Try again later."
+    case .unavailable(.http(let status)) where (500...599).contains(status):
+      "GitHub is unavailable. Try again later."
+    case .unavailable(.http):
+      "GitHub couldn’t provide a release. Try again later."
+    case .unavailable(.invalidResponse), .unavailable(.responseTooLarge):
+      "GitHub returned an invalid release. Try again later."
+    case .unavailable(.cancelled):
+      "The update check was cancelled. Try again."
+    }
+  }
+}
