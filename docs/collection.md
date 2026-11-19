@@ -64,9 +64,9 @@ The local token-refresh log records attempts and outcomes and **can contain acco
 
 ## Claude Statusline Observations
 
-The capture helper runs from Claude Code's `statusLine.command`, not session-event hooks. Install it using [Configuring the Claude Statusline Hook](../README.md#configuring-the-claude-statusline-hook).
+The capture helper runs from Claude Code's `statusLine.command`, not session-event hooks. Enable it as described in [Configuring the Claude Statusline Hook](../README.md#configuring-the-claude-statusline-hook).
 
-Statusline values update only when Claude Code supplies new usage observations. Deltavee's **Refresh** rereads the saved file; it cannot ask the server for newer values in Statusline Only mode. If no observation exists, the app shows `Statusline hook not installed or no data`, rather than asking you to sign in. After a manual app update, also copy the bundled helper as described in the setup instructions.
+Statusline values update only when Claude Code supplies new usage observations. Deltavee's **Refresh** rereads the saved file; it cannot ask the server for newer values in Statusline Only mode. If no observation exists, the app shows `Statusline hook not installed or no data`, rather than asking you to sign in.
 
 ## Refresh after Wake
 

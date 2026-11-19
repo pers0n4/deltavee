@@ -69,7 +69,13 @@ Deltavee는 같은 제공자의 계정 여러 개를 포함해 Claude·Codex 계
 
 배포본은 [GitHub Releases](https://github.com/pers0n4/deltavee/releases)에서 확인합니다. GitHub의 소스 코드 압축 파일이 아니라 `Deltavee.app`이 포함된 ZIP 파일을 받습니다. Deltavee를 종료하고 ZIP을 푼 뒤 `Deltavee.app`을 `~/Applications`에 복사해 실행합니다.
 
-Claude statusline hook을 사용한다면 수동 설치·업데이트마다 [번들에 포함된 hook을 복사](#claude-statusline-hook-설정)합니다.
+#### Homebrew (Apple Silicon)
+
+```bash
+brew install --cask pers0n4/tap/deltavee
+```
+
+업데이트할 때는 Deltavee를 종료하고 `brew upgrade --cask pers0n4/tap/deltavee`를 실행한 뒤 앱을 다시 엽니다.
 
 #### 소스에서 빌드
 
@@ -126,17 +132,9 @@ open ~/Applications/Deltavee.app
 
 #### Claude statusline hook 설정
 
-`Statusline Only` 모드나 OAuth 조회 실패 시 사용할 Claude Code statusline 값을 기록하는 선택 기능입니다. 소스 설치에서는 `scripts/install.sh`가 자동으로 복사합니다. Release ZIP으로 설치했다면 먼저 번들에 포함된 hook을 복사합니다.
+`Statusline Only` 모드나 OAuth 조회 실패 시 사용할 Claude Code statusline 값을 기록하는 선택 기능입니다. Deltavee를 처음 실행하면 앱 전용 폴더에 hook을 복사합니다. 이후 실행할 때 hook을 갱신하지만 Claude 설정은 변경하지 않습니다. hook 실행에는 `/usr/bin/python3`가 필요합니다.
 
-```bash
-mkdir -p "$HOME/Library/Application Support/dev.pers0n4.deltavee/bin"
-install -m 755 "$HOME/Applications/Deltavee.app/Contents/Resources/claude-statusline-capture.sh" \
-  "$HOME/Library/Application Support/dev.pers0n4.deltavee/bin/claude-statusline-capture.sh"
-```
-
-수동 앱 업데이트마다 이 복사를 반복해 hook과 앱 버전을 맞춥니다. hook 실행에는 `/usr/bin/python3`가 필요합니다.
-
-`<설정 디렉터리>/settings.json`(기본 계정은 `~/.claude/settings.json`)에 다음을 추가합니다.
+hook을 사용하려면 `<설정 디렉터리>/settings.json`(기본 계정은 `~/.claude/settings.json`)에 다음을 추가합니다.
 
 ```json
 {
@@ -171,7 +169,7 @@ Mac 로그인 시 Deltavee를 자동으로 실행하려면 `Settings…`에서 `
    ```bash
    rm -rf ~/Applications/Deltavee.app
    rm -rf ~/Library/Application\ Support/dev.pers0n4.deltavee
-   rm -rf ~/Library/Caches/deltavee           # 빌드 산출물과 번들
+   rm -rf ~/Library/Caches/deltavee  # 빌드 산출물과 번들
    ```
 
 4. Claude 계정은 각 설정 디렉터리의 `projects/`에서 `-deltavee-claude-refresh`로 끝나는 항목을 지웁니다. token 갱신이 만든 항목입니다.

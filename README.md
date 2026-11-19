@@ -69,7 +69,13 @@ See [collection details](docs/collection.md) for refresh behavior, data storage,
 
 Check [GitHub Releases](https://github.com/pers0n4/deltavee/releases) for downloadable builds. Download the ZIP containing `Deltavee.app`, not GitHub's source-code archives. Quit Deltavee, extract the ZIP, copy `Deltavee.app` to `~/Applications`, and open it.
 
-If you use the Claude statusline hook, [copy the bundled hook](#configuring-the-claude-statusline-hook) after each manual installation or update.
+#### Homebrew (Apple silicon)
+
+```bash
+brew install --cask pers0n4/tap/deltavee
+```
+
+To update, quit Deltavee, run `brew upgrade --cask pers0n4/tap/deltavee`, and open it again.
 
 #### Build from Source
 
@@ -126,17 +132,9 @@ If `Settings… → Data collection → Codex → CLI path (optional)` is left e
 
 #### Configuring the Claude Statusline Hook
 
-This optional hook records Claude Code statusline values for `Statusline Only` mode and as a fallback when OAuth fetches fail. Source installations copy it automatically through `scripts/install.sh`. If you installed a release ZIP, copy the bundled hook first:
+This optional hook records Claude Code statusline values for `Statusline Only` mode and as a fallback when OAuth fetches fail. Open Deltavee once to copy the hook to its local support folder. Deltavee keeps the copy up to date at launch without changing Claude's settings. The hook requires `/usr/bin/python3`.
 
-```bash
-mkdir -p "$HOME/Library/Application Support/dev.pers0n4.deltavee/bin"
-install -m 755 "$HOME/Applications/Deltavee.app/Contents/Resources/claude-statusline-capture.sh" \
-  "$HOME/Library/Application Support/dev.pers0n4.deltavee/bin/claude-statusline-capture.sh"
-```
-
-Repeat this copy after each manual app update to keep the hook and app versions aligned. The hook requires `/usr/bin/python3`.
-
-Add the following to `<config directory>/settings.json` (`~/.claude/settings.json` for the default account).
+To enable it, add the following to `<config directory>/settings.json` (`~/.claude/settings.json` for the default account).
 
 ```json
 {
@@ -171,7 +169,7 @@ To start Deltavee automatically when you log in to your Mac, turn on `Launch at 
    ```bash
    rm -rf ~/Applications/Deltavee.app
    rm -rf ~/Library/Application\ Support/dev.pers0n4.deltavee
-   rm -rf ~/Library/Caches/deltavee           # build output and bundle
+   rm -rf ~/Library/Caches/deltavee  # build output and bundle
    ```
 
 4. For Claude accounts, delete the `projects/` entry ending in `-deltavee-claude-refresh` in each config directory. The token refresh creates it.
