@@ -61,7 +61,7 @@ See [collection details](docs/collection.md) for refresh behavior, data storage,
 - macOS 26 or later
 - Xcode 26 or later, to build from source
 - Claude Code or the Codex CLI installed
-- [mise](https://mise.jdx.dev/) (optional, to run the build and install tasks)
+- [mise](https://mise.jdx.dev/) (optional, for mise installation or source build tasks)
 
 ### Install
 
@@ -76,6 +76,19 @@ brew install --cask pers0n4/tap/deltavee
 ```
 
 To update, quit Deltavee, run `brew upgrade --cask pers0n4/tap/deltavee`, and open it again.
+
+See [Uninstall](#uninstall) to remove the app with or without its local data.
+
+#### mise (Apple silicon)
+
+Install the prebuilt app from GitHub Releases. No source checkout or Xcode is required.
+
+```bash
+mise install github:pers0n4/deltavee@latest
+open "$(mise where github:pers0n4/deltavee@latest)/Deltavee.app"
+```
+
+To update, quit Deltavee and rerun both commands. Mise installs each version in a separate directory. By default, mise can delay selecting a new release with `@latest` for 24 hours. To install it sooner, replace `latest` in both commands with the version number from [GitHub Releases](https://github.com/pers0n4/deltavee/releases), without the leading `v`.
 
 See [Uninstall](#uninstall) to remove the app with or without its local data.
 
@@ -168,6 +181,7 @@ To start Deltavee automatically when you log in to your Mac, turn on `Launch at 
 2. If you enabled the statusline hook, remove Deltavee's `statusLine` entry from each affected account's `settings.json`, or restore the original command specified in `DELTAVEE_CHAIN_CMD`.
 3. Remove the app:
    - **Homebrew:** Run `brew uninstall --cask pers0n4/tap/deltavee`. To also delete Deltavee's local data, including account settings and usage history, add `--zap` to the uninstall command.
+   - **mise:** Run `mise uninstall --all github:pers0n4/deltavee` to remove all mise-installed versions. To also delete local app data, remove `~/Library/Application Support/dev.pers0n4.deltavee`.
    - **ZIP or source build:** Delete `Deltavee.app` from where you installed it. To also delete local app data, remove `~/Library/Application Support/dev.pers0n4.deltavee`.
 
    If you built from source, you can separately remove the build cache at `~/Library/Caches/deltavee`.

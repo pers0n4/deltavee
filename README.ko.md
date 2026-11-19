@@ -61,7 +61,7 @@ Deltavee는 같은 제공자의 계정 여러 개를 포함해 Claude·Codex 계
 - macOS 26 이상
 - Xcode 26 이상(소스 빌드용)
 - Claude Code 또는 Codex CLI 설치
-- [mise](https://mise.jdx.dev/)(선택, 빌드·설치 task 실행용)
+- [mise](https://mise.jdx.dev/)(선택, mise 설치 또는 소스 빌드 task 실행용)
 
 ### 설치
 
@@ -76,6 +76,19 @@ brew install --cask pers0n4/tap/deltavee
 ```
 
 업데이트할 때는 Deltavee를 종료하고 `brew upgrade --cask pers0n4/tap/deltavee`를 실행한 뒤 앱을 다시 엽니다.
+
+앱만 제거하거나 로컬 데이터까지 지우려면 [제거](#제거)를 참고하세요.
+
+#### mise (Apple Silicon)
+
+GitHub Releases의 배포본을 설치합니다. 소스 복제나 Xcode는 필요하지 않습니다.
+
+```bash
+mise install github:pers0n4/deltavee@latest
+open "$(mise where github:pers0n4/deltavee@latest)/Deltavee.app"
+```
+
+업데이트할 때는 Deltavee를 종료하고 두 명령을 다시 실행합니다. mise는 버전마다 별도 디렉터리에 설치합니다. mise 기본 설정에서는 새 릴리스가 게시된 뒤 24시간 동안 `@latest`로 선택되지 않을 수 있습니다. 바로 설치하려면 두 명령의 `latest`를 [GitHub Releases](https://github.com/pers0n4/deltavee/releases)에 표시된 버전 번호에서 앞의 `v`를 뺀 값으로 바꿉니다.
 
 앱만 제거하거나 로컬 데이터까지 지우려면 [제거](#제거)를 참고하세요.
 
@@ -168,6 +181,7 @@ Mac 로그인 시 Deltavee를 자동으로 실행하려면 `Settings…`에서 `
 2. 상태줄 훅을 활성화했다면 해당 계정의 `settings.json`에서 Deltavee의 `statusLine` 항목을 지우거나, `DELTAVEE_CHAIN_CMD`에 지정한 기존 명령으로 되돌립니다.
 3. 설치 방식에 맞춰 앱을 제거합니다.
    - **Homebrew:** `brew uninstall --cask pers0n4/tap/deltavee`를 실행합니다. 계정 설정과 사용량 기록 등 앱 데이터도 지우려면 제거 명령에 `--zap`을 추가합니다.
+   - **mise:** `mise uninstall --all github:pers0n4/deltavee`를 실행해 mise로 설치한 모든 버전을 제거합니다. 앱 데이터도 지우려면 `~/Library/Application Support/dev.pers0n4.deltavee`를 삭제합니다.
    - **ZIP·소스 설치:** 설치한 위치에서 `Deltavee.app`을 지웁니다. 앱 데이터도 지우려면 `~/Library/Application Support/dev.pers0n4.deltavee`를 삭제합니다.
 
    소스에서 빌드했다면 `~/Library/Caches/deltavee`의 빌드 캐시도 별도로 삭제할 수 있습니다.
