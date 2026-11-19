@@ -2,6 +2,7 @@ import AppKit
 import DeltaveeCore
 import ServiceManagement
 import SwiftUI
+import os
 
 @MainActor
 final class MenuBarController: NSObject, NSApplicationDelegate {
@@ -13,6 +14,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
   private var renderTask: Task<Void, Never>?
   private var terminationTask: Task<Void, Never>?
   func applicationDidFinishLaunching(_ notification: Notification) {
+    refreshClaudeStatuslineHook()
     NSApp.setActivationPolicy(.accessory)
     item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     item.button?.target = self
@@ -36,6 +38,23 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
       Task { @MainActor in self?.model.tick() }
     }
   }
+
+  private func refreshClaudeStatuslineHook() {
+    guard
+      let bundled = Bundle.main.url(
+        forResource: ClaudeStatuslineHook.filename, withExtension: nil)
+    else { return }
+    let installed = Paths.applicationSupport
+      .appendingPathComponent("bin", isDirectory: true)
+      .appendingPathComponent(ClaudeStatuslineHook.filename)
+    do {
+      try ClaudeStatuslineHook.refresh(bundled: bundled, installed: installed)
+    } catch {
+      let logger = Logger(subsystem: "dev.pers0n4.deltavee", category: "statusline")
+      logger.error("Could not sync the Claude statusline hook: \(error)")
+    }
+  }
+
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     if terminationTask == nil {
       terminationTask = Task { [model] in

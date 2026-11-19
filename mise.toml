@@ -43,7 +43,7 @@ env._.file = ".env.production"
 run = "sh scripts/publish-release.sh"
 
 [tasks.install]
-description = "Install the app bundle and the statusline script it carries"
+description = "Install the app bundle"
 depends = ["build"]
 run = "sh scripts/install.sh"
 

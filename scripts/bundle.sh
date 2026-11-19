@@ -50,7 +50,7 @@ if [ -z "$ICON_NAME" ]; then
 	exit 1
 fi
 /usr/bin/plutil -insert CFBundleIconName -string "$ICON_NAME" "$APP/Contents/Info.plist"
-# Ship the Claude statusline hook with the app so install.sh installs the matching version.
+# Ship the hook so the app can install or refresh it at launch.
 cp "$ROOT/Assets/claude-statusline-capture.sh" "$APP/Contents/Resources/claude-statusline-capture.sh"
 chmod 755 "$APP/Contents/Resources/claude-statusline-capture.sh"
 # A dirty or changing checkout remains buildable locally, but is not a release candidate.

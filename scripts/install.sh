@@ -13,13 +13,7 @@ rm -rf "$DESTINATION/Contents/Resources/Deltavee_Deltavee.bundle"
 rm -f "$DESTINATION/Contents/Resources/Assets.car" "$DESTINATION/Contents/Resources/AppIcon.icns" "$DESTINATION/Contents/Resources/claude-statusline-capture.sh"
 /usr/bin/ditto "$SOURCE" "$DESTINATION"
 /usr/bin/codesign --verify --strict "$DESTINATION"
-CAPTURE="$HOME/Library/Application Support/dev.pers0n4.deltavee/bin/claude-statusline-capture.sh"
-mkdir -p "$(dirname -- "$CAPTURE")"
-# Copied out of the bundle: settings.json points at this fixed path, independent of where the app lives.
-cp "$DESTINATION/Contents/Resources/claude-statusline-capture.sh" "$CAPTURE"
-chmod 755 "$CAPTURE"
 # ditto keeps the existing bundle directory's mtime, so Finder and icon caches keep the old icon.
 touch "$DESTINATION"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DESTINATION"
 printf '%s\n' "$DESTINATION"
-printf '%s\n' "$CAPTURE"
