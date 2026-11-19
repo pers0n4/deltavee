@@ -77,6 +77,8 @@ brew install --cask pers0n4/tap/deltavee
 
 To update, quit Deltavee, run `brew upgrade --cask pers0n4/tap/deltavee`, and open it again.
 
+See [Uninstall](#uninstall) to remove the app with or without its local data.
+
 #### Build from Source
 
 Clone the repository and enter it:

@@ -77,6 +77,8 @@ brew install --cask pers0n4/tap/deltavee
 
 업데이트할 때는 Deltavee를 종료하고 `brew upgrade --cask pers0n4/tap/deltavee`를 실행한 뒤 앱을 다시 엽니다.
 
+앱만 제거하거나 로컬 데이터까지 지우려면 [제거](#제거)를 참고하세요.
+
 #### 소스에서 빌드
 
 저장소를 복제하고 해당 디렉터리로 이동합니다.
