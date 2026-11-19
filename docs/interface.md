@@ -12,7 +12,7 @@ See the [Deltavee README](../README.md) for installation and [Collection Behavio
 
 ## Update Notices
 
-- `Check for Updates` checks for a new stable release. The app also checks at startup and every 24 hours. Drafts and prereleases do not produce notices.
+- `Check for Updates` checks for a new stable release. The app also checks at startup and every 24 hours. After a temporary failure, it retries after 30 minutes, up to twice per cycle. Drafts and prereleases do not produce notices.
 - Checking, up to date, new release available, and check failed are distinct states, separate from usage refresh status. A failed or unavailable check does not mean the app is up to date; you can check again manually.
 - A new-release notice shows the version and a link to its GitHub Release page. The browser opens only when you select the link. Downloads and installation are manual; there are no automatic downloads or installations, macOS notification permission requests, or system banners. See the [README's installation instructions](../README.md).
 - Update checks contact the public GitHub API for `pers0n4/deltavee`. They are separate from Claude usage collection and still run in `Statusline Only`. No credentials, tokens, usage data, or account information are sent. GitHub receives ordinary HTTPS request metadata, including your IP address and User-Agent.
@@ -52,7 +52,7 @@ The logos identify account providers. Deltavee is not an official Anthropic or O
 
 ### Accounts Screen
 
-- Choose `Claude` or `Codex` from `Add Account`. With no accounts, this applies the provider's default directory and opens the new account's settings. The provider cannot be changed afterward; add another account to use another provider.
+- Choose `Claude` or `Codex` from `Add Account` to open the new account's settings. The app fills in the provider's default configuration directory. If the CLI account uses a different directory, replace the default with that path. The provider cannot be changed afterward; add another account to use another provider.
 - Expand an account card to edit it; `⌘⌥E` expands or collapses all cards. The header switch controls menu bar visibility without expanding the card.
 - Drag the left-hand handle to reorder accounts; the order applies when you release it. VoiceOver actions can move accounts up or down, and reordering respects Reduce Motion.
 - `Label (optional)` adds a secondary label. Blank labels or labels matching the provider do not add another display line.

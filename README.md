@@ -35,7 +35,7 @@ It tracks several Claude and Codex accounts side by side, including more than on
 - Shows each account's weekly quota next to its provider logo in the menu bar, as the remaining share by default or as the used share. A trailing `!` marks a failed last fetch. Values more than an hour old are dimmed, or shown with a hollow dot when `Color menu bar usage` is enabled.
 - The panel shows a weekly quota bar, colored by how much of the quota is used, and the reset time.
 - Accounts can be labeled, reordered by dragging, and hidden from the menu bar.
-- Refreshes all accounts on a schedule or one account on demand, and waits out Claude rate limits instead of retrying.
+- Fetches usage for all accounts on a schedule or for one account on demand. After a Claude OAuth rate limit, it waits before trying again.
 - Stores no tokens. Claude's `Statusline Only` mode disables Keychain and network access for Claude usage collection.
 - Launches at login if enabled.
 - Shows an in-panel notice when a new stable version is available. Open its download page and install it manually; the app never downloads or installs updates.
@@ -86,7 +86,7 @@ git clone https://github.com/pers0n4/deltavee.git
 cd deltavee
 ```
 
-From the repository root, build and install with the commands below. No Apple Development certificate is required.
+If you're updating an existing installation, quit Deltavee first. From the repository root, build and install with the commands below. No Apple Development certificate is required.
 
 ```bash
 sh scripts/bundle.sh
@@ -132,9 +132,9 @@ If `Settings… → Data collection → Codex → CLI path (optional)` is left e
 
 #### Configuring the Claude Statusline Hook
 
-This optional hook records Claude Code statusline values for `Statusline Only` mode and as a fallback when OAuth fetches fail. Open Deltavee once to copy the hook to its local support folder. Deltavee keeps the copy up to date at launch without changing Claude's settings. The hook requires `/usr/bin/python3`.
+This optional hook records weekly usage from the Claude Code statusline for `Statusline Only` mode and as a fallback when OAuth fetches fail. Open Deltavee once to copy the hook to its application support folder. Deltavee keeps the copy up to date at launch without changing Claude's settings. The hook requires `/usr/bin/python3`.
 
-To enable it, add the following to `<config directory>/settings.json` (`~/.claude/settings.json` for the default account).
+For each Claude account that should use the hook, open `settings.json` in that account's configuration directory (`~/.claude/settings.json` for the default account). Add the `statusLine` entry below without replacing the whole file.
 
 ```json
 {
@@ -163,16 +163,14 @@ To start Deltavee automatically when you log in to your Mac, turn on `Launch at 
 ## Uninstall
 
 1. If `Launch at login` is on, turn it off in `Settings…`, then quit Deltavee.
-2. If you installed the statusline hook, remove `statusLine` from each `<config directory>/settings.json`, or restore the command set in `DELTAVEE_CHAIN_CMD`.
-3. Delete the app, its data, and the build cache.
+2. If you enabled the statusline hook, remove Deltavee's `statusLine` entry from each affected account's `settings.json`, or restore the original command specified in `DELTAVEE_CHAIN_CMD`.
+3. Remove the app:
+   - **Homebrew:** Run `brew uninstall --cask pers0n4/tap/deltavee`. To also delete Deltavee's local data, including account settings and usage history, add `--zap` to the uninstall command.
+   - **ZIP or source build:** Delete `Deltavee.app` from where you installed it. To also delete local app data, remove `~/Library/Application Support/dev.pers0n4.deltavee`.
 
-   ```bash
-   rm -rf ~/Applications/Deltavee.app
-   rm -rf ~/Library/Application\ Support/dev.pers0n4.deltavee
-   rm -rf ~/Library/Caches/deltavee  # build output and bundle
-   ```
+   If you built from source, you can separately remove the build cache at `~/Library/Caches/deltavee`.
 
-4. For Claude accounts, delete the `projects/` entry ending in `-deltavee-claude-refresh` in each config directory. The token refresh creates it.
+4. If Claude Code created a `projects/` entry ending in `-deltavee-claude-refresh` during automatic token refresh, delete it from each affected account's configuration directory.
 
 The app creates no Keychain items, so CLI sign-ins are unaffected.
 

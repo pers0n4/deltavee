@@ -4,7 +4,7 @@
 
 <h1 align="center">Deltavee</h1>
 
-<p align="center">Claude·Codex 구독 계정별 주간 사용량을 macOS 메뉴바에 표시합니다.</p>
+<p align="center">Claude와 Codex의 주간 구독 사용량을 계정별로 macOS 메뉴바에 표시합니다.</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/macOS%2026%2B-000000?style=flat-square&logo=apple&logoColor=white" alt="macOS 26+">
@@ -35,24 +35,24 @@ Deltavee는 같은 제공자의 계정 여러 개를 포함해 Claude·Codex 계
 - 메뉴바에 계정별 주간 사용량을 제공자 로고와 함께 표시합니다. 기본은 남은 비율이고, 사용한 비율로 바꿀 수 있습니다. 끝의 `!`는 마지막 조회 실패를 뜻합니다. 1시간 넘게 지난 값은 흐린 색으로 표시하며, `Color menu bar usage`를 켜면 빈 점으로 구분합니다.
 - 패널에는 사용한 비율에 따라 색이 바뀌는 주간 사용량 막대와 한도 초기화 시각을 표시합니다.
 - 계정마다 레이블을 붙이고, 드래그로 순서를 바꾸고, 메뉴바 표시 여부를 정할 수 있습니다.
-- 전체 계정을 주기적으로 조회하거나 계정 하나를 즉시 조회합니다. Claude rate limit에 걸리면 재시도하지 않고 해제 시각까지 기다립니다.
-- 토큰을 저장하지 않습니다. Claude의 `Statusline Only` 모드는 Claude 수집의 Keychain·네트워크 접근을 끕니다.
+- 전체 계정의 사용량을 주기적으로 조회하거나 계정 하나를 즉시 조회합니다. Claude OAuth 요청이 제한되면 대기한 뒤 다시 조회합니다.
+- 토큰을 저장하지 않습니다. `Statusline Only` 모드에서는 Claude 사용량을 확인할 때 키체인을 읽거나 제공자에게 직접 요청하지 않습니다.
 - 설정하면 로그인 시 실행합니다.
 - 새 정식 버전이 있으면 패널에 알립니다. 다운로드 페이지를 열어 직접 설치하며, 앱이 자동으로 다운로드하거나 설치하지 않습니다.
 
 ## 수집 방식
 
-- Codex: 계정별로 Codex CLI를 실행해 주간 한도를 조회합니다. 앱은 `auth.json`을 읽거나 쓰지 않습니다. OpenAI는 로컬 또는 오픈소스 앱의 app-server 인증을 허용하지만, 상업·호스팅 서비스에는 허용하지 않습니다([Codex app-server](https://learn.chatgpt.com/docs/app-server#auth-endpoints)).
-- Claude: CLI의 자격증명으로 비공식 API를 조회하고, 실패하면 statusline 기록을 읽습니다. 앱은 refresh token을 쓰거나 자격증명을 저장하지 않습니다. access token이 만료되면 Claude Code를 실행해 갱신하며, 실행마다 Haiku 모델 요청 1회분의 사용량을 소모합니다.
+- Codex: 계정별로 Codex CLI를 실행해 주간 사용량을 조회합니다. 앱은 `auth.json`을 읽거나 쓰지 않습니다. OpenAI는 로컬 또는 오픈소스 앱의 app-server 인증을 허용하지만, 상업·호스팅 서비스에는 허용하지 않습니다([Codex app-server](https://learn.chatgpt.com/docs/app-server#auth-endpoints)).
+- Claude: CLI의 인증 정보로 비공식 API에 사용량을 요청하고, 조회에 실패하면 상태줄 기록을 읽습니다. 앱은 갱신 토큰을 사용하거나 인증 정보를 저장하지 않습니다. 액세스 토큰이 만료되면 Claude Code를 실행해 갱신을 시도하며, 실행마다 Haiku 모델 요청 1회분의 사용량을 소모합니다.
 - 주간 사용량만 수집합니다. 5시간 한도 등 다른 한도는 표시하지 않습니다.
 - 앱 데이터는 `~/Library/Application Support/dev.pers0n4.deltavee/`에 저장하며 토큰은 저장하지 않습니다.
 
-갱신 방식·데이터 저장·계정 위험은 [수집 동작](docs/collection.md), 표시 설정·업데이트 알림은 [화면 안내](docs/interface.md)를 참고합니다.
+조회·재시도 방식, 데이터 저장, 계정 위험은 [수집 동작](docs/collection.md), 표시 설정과 업데이트 알림은 [화면 안내](docs/interface.md)를 참고하세요.
 
 > [!WARNING]
-> 기본 Claude 모드는 Claude Code의 Keychain 항목을 읽어 비공식 endpoint를 호출합니다. Anthropic은 개발자가 Claude.ai 자격증명이나 세션 토큰을 수집·저장·중개하는 것을 허용하지 않습니다([Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)). 이 사용의 허용 여부는 확인되지 않았고, 계정 정지 위험이 없다는 보장도 없습니다.
+> 기본 Claude 모드는 Claude Code의 키체인 항목을 읽어 비공식 API를 호출합니다. Anthropic은 개발자가 Claude.ai 인증 정보나 세션 토큰을 수집·저장·중개하는 것을 허용하지 않습니다([Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)). 이 사용이 허용되는지는 확인되지 않았으며, 계정 정지 위험이 없다고 보장할 수 없습니다.
 >
-> `Settings… → Data collection → Claude → Statusline Only`가 더 보수적인 방식입니다. Claude Code statusline이 로컬에 기록한 값만 읽고, 토큰을 읽거나 제공자를 호출하지 않습니다. 값은 CLI가 새 값을 기록할 때만 갱신됩니다. 이 모드도 계정 위험이 없다는 보장은 없습니다.
+> `Settings… → Data collection → Claude → Statusline Only`는 더 보수적인 선택입니다. Claude Code 상태줄이 로컬에 기록한 값만 읽으며, 토큰을 읽거나 제공자에게 직접 요청하지 않습니다. CLI가 새 값을 기록해야 사용량이 갱신됩니다. 이 모드도 계정 위험이 없다고 보장할 수 없습니다.
 
 ## 시작하기
 
@@ -86,7 +86,7 @@ git clone https://github.com/pers0n4/deltavee.git
 cd deltavee
 ```
 
-저장소 루트에서 다음 명령으로 빌드하고 설치합니다. Apple Development 인증서는 필요하지 않습니다.
+기존 설치를 업데이트한다면 먼저 Deltavee를 종료하세요. 저장소 루트에서 다음 명령으로 빌드하고 설치합니다. Apple Development 인증서는 필요하지 않습니다.
 
 ```bash
 sh scripts/bundle.sh
@@ -130,11 +130,11 @@ open ~/Applications/Deltavee.app
 
 ### 선택 설정
 
-#### Claude statusline hook 설정
+#### Claude 상태줄 훅 설정
 
-`Statusline Only` 모드나 OAuth 조회 실패 시 사용할 Claude Code statusline 값을 기록하는 선택 기능입니다. Deltavee를 처음 실행하면 앱 전용 폴더에 hook을 복사합니다. 이후 실행할 때 hook을 갱신하지만 Claude 설정은 변경하지 않습니다. hook 실행에는 `/usr/bin/python3`가 필요합니다.
+이 훅은 Claude Code 상태줄의 주간 사용량을 기록합니다. `Statusline Only` 모드에서 사용하거나, OAuth 조회가 실패했을 때 대체값으로 사용합니다. Deltavee를 한 번 실행하면 앱 전용 폴더에 훅이 복사됩니다. 이후 앱을 열 때 훅을 갱신하되 Claude 설정은 변경하지 않습니다. 훅 실행에는 `/usr/bin/python3`가 필요합니다.
 
-hook을 사용하려면 `<설정 디렉터리>/settings.json`(기본 계정은 `~/.claude/settings.json`)에 다음을 추가합니다.
+훅을 사용하려는 각 Claude 계정의 설정 디렉터리에서 `settings.json`에 다음 `statusLine` 항목을 추가합니다. 기본 계정은 `~/.claude/settings.json`을 수정합니다. 기존 파일 전체를 덮어쓰지 마세요.
 
 ```json
 {
@@ -145,7 +145,7 @@ hook을 사용하려면 `<설정 디렉터리>/settings.json`(기본 계정은 `
 }
 ```
 
-기존 statusline 명령을 유지하려면 `command` 문자열 안에서 `DELTAVEE_CHAIN_CMD`로 지정합니다. 그 명령이 같은 입력을 받고, 그 출력이 그대로 표시됩니다.
+이미 상태줄 명령을 쓰고 있다면 `command` 문자열 안에서 `DELTAVEE_CHAIN_CMD`로 기존 명령을 지정합니다. 기존 명령은 같은 입력을 받고, 출력은 그대로 표시됩니다.
 
 ```json
 {
@@ -163,18 +163,16 @@ Mac 로그인 시 Deltavee를 자동으로 실행하려면 `Settings…`에서 `
 ## 제거
 
 1. `Launch at login`이 켜져 있으면 `Settings…`에서 끈 뒤 Deltavee를 종료합니다.
-2. statusline hook을 설치했다면 각 `<설정 디렉터리>/settings.json`에서 `statusLine`을 지우거나, `DELTAVEE_CHAIN_CMD`에 지정한 명령으로 되돌립니다.
-3. 앱, 앱 데이터, 빌드 캐시를 삭제합니다.
+2. 상태줄 훅을 활성화했다면 해당 계정의 `settings.json`에서 Deltavee의 `statusLine` 항목을 지우거나, `DELTAVEE_CHAIN_CMD`에 지정한 기존 명령으로 되돌립니다.
+3. 설치 방식에 맞춰 앱을 제거합니다.
+   - **Homebrew:** `brew uninstall --cask pers0n4/tap/deltavee`를 실행합니다. 계정 설정과 사용량 기록 등 앱 데이터도 지우려면 제거 명령에 `--zap`을 추가합니다.
+   - **ZIP·소스 설치:** 설치한 위치에서 `Deltavee.app`을 지웁니다. 앱 데이터도 지우려면 `~/Library/Application Support/dev.pers0n4.deltavee`를 삭제합니다.
 
-   ```bash
-   rm -rf ~/Applications/Deltavee.app
-   rm -rf ~/Library/Application\ Support/dev.pers0n4.deltavee
-   rm -rf ~/Library/Caches/deltavee  # 빌드 산출물과 번들
-   ```
+   소스에서 빌드했다면 `~/Library/Caches/deltavee`의 빌드 캐시도 별도로 삭제할 수 있습니다.
 
-4. Claude 계정은 각 설정 디렉터리의 `projects/`에서 `-deltavee-claude-refresh`로 끝나는 항목을 지웁니다. token 갱신이 만든 항목입니다.
+4. 토큰 자동 갱신을 사용했다면 각 Claude 계정의 설정 디렉터리에서 `projects/` 아래에 있는 `-deltavee-claude-refresh`로 끝나는 항목을 지웁니다.
 
-앱은 Keychain 항목을 만들지 않으므로 CLI 로그인에는 영향이 없습니다.
+앱은 키체인 항목을 만들지 않으므로 CLI 로그인에는 영향이 없습니다.
 
 ## 라이선스
 

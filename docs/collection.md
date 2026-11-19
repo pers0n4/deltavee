@@ -22,12 +22,12 @@ Codex uses the [official app-server's usage reporting](https://learn.chatgpt.com
 
 - **Weekly usage only:** Deltavee displays one weekly quota per account, not 5-hour or per-model limits. A provider may report the weekly quota as unavailable. An unexpected response format is reported as an error.
 - **Stale values:** A value becomes stale after 1 hour without a new observation. Rereading an old statusline file does not make it current.
-- **Failures:** A failed fetch preserves the last successful value and its observation time. Missing credentials or a rejected login require signing in through the CLI; available statusline observations can still be shown.
-- **Account changes:** If you sign in to a different account in the same directory, Deltavee asks you to accept the change in the panel before mixing in the new account's values.
+- **Failures:** A failed fetch keeps the previous observation unless a newer local statusline observation is available. Showing a newer statusline value does not clear the failure. If credentials are missing or rejected, sign in through the CLI.
+- **Account changes:** When Deltavee detects a different account in the same configuration directory, it asks you to confirm in the panel before showing that account's usage. `Statusline Only` does not detect account changes.
 
 ## Claude OAuth 429 Wait
 
-If Anthropic rate-limits an OAuth usage request, Deltavee waits before trying again, honoring the longer of its backoff and the server's requested wait (the server wait is capped at 24 hours). Refresh, settings changes, app restarts, and waking the Mac do not bypass this wait. Statusline Only does not use the endpoint; switching to it preserves any pending wait for a later return to OAuth mode.
+If Anthropic rate-limits an OAuth usage request, Deltavee waits before trying again, honoring the longer of its backoff and the server's requested wait (the server wait is capped at 24 hours). Refresh, other settings changes, app restarts, and waking the Mac do not bypass this wait. Changing an account's configuration directory clears the wait associated with the previous directory. `Statusline Only` does not use the endpoint; switching to it preserves any pending wait for a later return to OAuth mode.
 
 See [Account Display](interface.md#account-display) for how waiting accounts appear.
 
