@@ -78,6 +78,17 @@ release_verify_signature "$DIST_APP"
 [ "$CODE_HASH" = "$DIST_CODE_HASH" ] || release_fail "The current app changed during publication preparation; nothing was published"
 release_require_source_tag
 [ "$TAG_OBJECT" = "$SOURCE_TAG_OBJECT" ] || release_fail "The local tag changed during publication preparation; nothing was published"
+# gh 2.105.0 rejects --notes-from-tag with --repo (verified 2026-11-19).
+# Extract annotation text without its signing block; lightweight tags retain
+# gh's documented commit-message fallback.
+# https://cli.github.com/manual/gh_release_create
+if [ "$TAG_TYPE" = tag ]; then
+	git -C "$ROOT" for-each-ref --format='%(contents:subject)%0a%0a%(contents:body)' "refs/tags/$TAG" >"$CHECK_DIR/release-notes.txt" ||
+		release_fail "Could not read the source tag's release notes; nothing was published"
+else
+	git -C "$ROOT" log -1 --format=%B "refs/tags/$TAG" >"$CHECK_DIR/release-notes.txt" ||
+		release_fail "Could not read the source commit's release notes; nothing was published"
+fi
 if ! (
 	set -C
 	: >"$RELEASE_DIR/publication-started"
@@ -88,7 +99,7 @@ printf '%s\n' "$TAG" "$TAG_OBJECT" "$ZIP_SHA" >"$RELEASE_DIR/publication-started
 # --verify-tag forbids gh's default automatic tag creation. With assets, gh may
 # create a draft and partially upload before failing; never retry automatically.
 # https://cli.github.com/manual/gh_release_create (verified 2026-11-18)
-if ! gh release create "$TAG" "$CHECK_DIR/$ASSET_NAME" "$CHECK_DIR/$CHECKSUM_NAME" --repo "github.com/$RELEASE_REPOSITORY" --verify-tag --title "Deltavee $VERSION" --notes-from-tag --latest >"$RELEASE_DIR/github-publish.log" 2>&1; then
+if ! gh release create "$TAG" "$CHECK_DIR/$ASSET_NAME" "$CHECK_DIR/$CHECKSUM_NAME" --repo "github.com/$RELEASE_REPOSITORY" --verify-tag --title "Deltavee $VERSION" --notes-file "$CHECK_DIR/release-notes.txt" --latest >"$RELEASE_DIR/github-publish.log" 2>&1; then
 	release_fail "GitHub publication did not finish successfully and may have created a partial draft/release. Inspect https://github.com/$RELEASE_REPOSITORY/releases and $RELEASE_DIR/github-publish.log; do not rerun blindly"
 fi
 

@@ -16,7 +16,10 @@ if tool=='git':
  if '--show-toplevel' in a: print(os.environ['FIXTURE_ROOT'])
  elif 'status --porcelain' in a:
   if case=='dirty': print(' M changed.swift')
- elif 'cat-file -t' in a: print('tag')
+ elif 'cat-file -t' in a: print('commit' if case=='lightweight-tag' else 'tag')
+ elif 'for-each-ref' in args or 'log' in args:
+  import subprocess
+  sys.exit(subprocess.run([os.environ['REAL_GIT'],'--git-dir',str(state/'tag-repo.git'),*args]).returncode)
  elif 'refs/tags/' in a:
   if case=='missingtag':sys.exit(1)
   print('a'*40 if '^{commit}' in a else 'b'*40)
@@ -38,14 +41,17 @@ elif tool=='xcrun':
  else:raise SystemExit('Unexpected xcrun '+repr(args))
 elif tool=='gh':
  if args[:2]==['release','create']:
+  if '--notes-from-tag' in args and '--repo' in args:raise SystemExit('using --notes-from-tag with --repo is not supported')
   count('creates');assert '--verify-tag' in args and 'github.com/pers0n4/deltavee' in args
+  notes=pathlib.Path(args[args.index('--notes-file')+1]).read_text()
+  (state/'published-notes').write_text(notes)
   if case=='partial':sys.exit(1)
  elif args[0]=='api':
   endpoint=next(x for x in args if x.startswith('repos/'))
   if '/git/ref/' in endpoint:
    sha=('d' if case=='remote-mismatch' else 'b')*40
    if '--jq' in args:print(sha)
-   else:print(json.dumps({'ref':'refs/tags/v0.1.0','object':{'sha':sha,'type':'tag'}}))
+   else:print(json.dumps({'ref':'refs/tags/v0.1.0','object':{'sha':sha,'type':'commit' if case=='lightweight-tag' else 'tag'}}))
   elif '/releases?' in endpoint:
    if case=='existing':print('v0.1.0')
   elif '/releases/tags/' in endpoint:print('false' if case=='digest-mismatch' else 'true')
@@ -58,13 +64,25 @@ with tempfile.TemporaryDirectory(prefix='deltavee-release-smoke-') as tmp:
  def fixture(name):
   base=root/name;base.mkdir();repo=base/'repo';(repo/'scripts').mkdir(parents=True)
   for f in ('release-common.sh','notarize.sh','publish-release.sh'):shutil.copy2(source/'scripts'/f,repo/'scripts'/f)
+  real_git=shutil.which('git')
+  tag_repo=base/'tag-repo.git'
+  def git_object(kind,content):
+   return subprocess.run([real_git,'--git-dir',str(tag_repo),'hash-object','-w','-t',kind,'--stdin'],input=content,capture_output=True,check=True).stdout.decode().strip()
+  subprocess.run([real_git,'init','--bare','--quiet',str(tag_repo)],check=True)
+  tree=git_object('tree',b'')
+  commit=git_object('commit',f'tree {tree}\nauthor Fixture <fixture@example.invalid> 1 +0000\ncommitter Fixture <fixture@example.invalid> 1 +0000\n\nFixture source\n'.encode())
+  notes='Deltavee 0.1.0\n\nInitial release.\n\n- Manual downloads only.\n'
+  signature='-----BEGIN PGP SIGNATURE-----\nfixture-signature\n-----END PGP SIGNATURE-----\n' if name=='signed-tag' else ''
+  if name=='ssh-signed-tag':signature='-----BEGIN SSH SIGNATURE-----\nfixture-signature\n-----END SSH SIGNATURE-----\n'
+  tag=git_object('tag',f'object {commit}\ntype commit\ntag v0.1.0\ntagger Fixture <fixture@example.invalid> 1 +0000\n\n{notes}{signature}'.encode())
+  subprocess.run([real_git,'--git-dir',str(tag_repo),'update-ref','refs/tags/v0.1.0',commit if name=='lightweight-tag' else tag],check=True)
   bin=base/'bin';bin.mkdir()
   for tool in ('git','codesign','spctl','xcrun','gh'):
    p=bin/tool;p.write_text(stub);p.chmod(0o700)
   app=base/'home/Library/Caches/deltavee/dist/Deltavee.app';(app/'Contents/MacOS').mkdir(parents=True)
   (app/'Contents/MacOS/Deltavee').write_text('fixture executable')
   (app/'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleShortVersionString':'0.1.0','CFBundleVersion':'1','CFBundleIdentifier':'dev.pers0n4.deltavee','DeltaveeUpdateRepository':'pers0n4/deltavee','DeltaveeSourceRevision':'a'*40}))
-  env=dict(os.environ,HOME=str(base/'home'),PATH=str(bin)+':/usr/bin:/bin',FIXTURE=str(base),FIXTURE_ROOT=str(repo),NOTARY_PROFILE='fixture-profile')
+  env=dict(os.environ,HOME=str(base/'home'),PATH=str(bin)+':/usr/bin:/bin',FIXTURE=str(base),FIXTURE_ROOT=str(repo),NOTARY_PROFILE='fixture-profile',REAL_GIT=real_git)
   return base,repo,env
  def run(repo,env,script,success=True):
   r=subprocess.run(['sh',str(repo/'scripts'/script)],env=env,capture_output=True,text=True)
@@ -83,7 +101,7 @@ with tempfile.TemporaryDirectory(prefix='deltavee-release-smoke-') as tmp:
   assert (r.returncode==0)==success,(name,r.returncode,r.stderr)
   assert 'private-builder' not in r.stderr
   print(name+': passed (isolated binary privacy check)')
- for case in ('ok','timeout','missingprofile','missingtag','dirty','tamper','remote-mismatch','existing','partial','digest-mismatch','no-ticket'):
+ for case in ('ok','signed-tag','ssh-signed-tag','lightweight-tag','timeout','missingprofile','missingtag','dirty','tamper','remote-mismatch','existing','partial','digest-mismatch','no-ticket'):
   base,repo,env=fixture(case);env['CASE']=case
   if case=='missingprofile':env['NOTARY_PROFILE']=''
   if case in ('missingprofile','missingtag','dirty'):
@@ -96,9 +114,12 @@ with tempfile.TemporaryDirectory(prefix='deltavee-release-smoke-') as tmp:
    assert archive.exists() and number(base,'submits')==1
    if case=='tamper':archive.write_bytes(archive.read_bytes()+b'tampered')
    if case=='no-ticket':(rel/'Deltavee.app/.ticket').unlink()
-   success=case in ('ok','timeout')
+   success=case in ('ok','signed-tag','ssh-signed-tag','lightweight-tag','timeout')
    run(repo,env,'publish-release.sh',success)
    if case=='partial':run(repo,env,'publish-release.sh',False);assert number(base,'creates')==1
    if case in ('tamper','remote-mismatch','existing','no-ticket'):assert number(base,'creates')==0
-   if success:assert number(base,'creates')==1
+   if success:
+    assert number(base,'creates')==1
+    expected_notes='Fixture source' if case=='lightweight-tag' else 'Deltavee 0.1.0\n\nInitial release.\n\n- Manual downloads only.'
+    assert (base/'published-notes').read_text().strip()==expected_notes
   print(case+': passed (isolated CLI fixtures; no Apple/GitHub requests)')
