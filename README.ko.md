@@ -43,7 +43,7 @@ Deltavee는 같은 제공자의 계정 여러 개를 포함해 Claude·Codex 계
 ## 수집 방식
 
 - Codex: 계정별로 Codex CLI를 실행해 주간 사용량을 조회합니다. 앱은 `auth.json`을 읽거나 쓰지 않습니다. OpenAI는 로컬 또는 오픈소스 앱의 app-server 인증을 허용하지만, 상업·호스팅 서비스에는 허용하지 않습니다([Codex app-server](https://learn.chatgpt.com/docs/app-server#auth-endpoints)).
-- Claude: CLI의 인증 정보로 비공식 API에 사용량을 요청하고, 조회에 실패하면 상태줄 기록을 읽습니다. 앱은 갱신 토큰을 사용하거나 인증 정보를 저장하지 않습니다. 액세스 토큰이 만료되면 Claude Code를 실행해 갱신을 시도하며, 실행마다 Haiku 모델 요청 1회분의 사용량을 소모합니다.
+- Claude: CLI의 인증 정보로 비공식 API에 사용량을 요청하고, 조회에 실패하면 상태줄 기록을 읽습니다. 앱은 갱신 토큰을 사용하거나 인증 정보를 저장하지 않습니다. 액세스 토큰이 만료되면 백그라운드에서 Claude Code를 실행할 수 있습니다. [토큰 갱신과 사용량 비용](docs/collection.md#claude-token-expiration-and-cli-refresh)을 참고하세요.
 - 주간 사용량만 수집합니다. 5시간 한도 등 다른 한도는 표시하지 않습니다.
 - 앱 데이터는 `~/Library/Application Support/dev.pers0n4.deltavee/`에 저장하며 토큰은 저장하지 않습니다.
 
@@ -60,7 +60,7 @@ Deltavee는 같은 제공자의 계정 여러 개를 포함해 Claude·Codex 계
 
 - macOS 26 이상
 - Xcode 26 이상(소스 빌드용)
-- Claude Code 또는 Codex CLI 설치
+- [Claude Code CLI](docs/collection.md#set-up-claude-code-cli-for-desktop-users) 또는 [Codex CLI](docs/collection.md#install-codex-cli-without-nodejs) 설치
 - [mise](https://mise.jdx.dev/)(선택, mise 설치 또는 소스 빌드 task 실행용)
 
 ### 설치
@@ -141,7 +141,7 @@ open ~/Applications/Deltavee.app
 
 2. 패널 하단의 `Accounts…`를 열고 `Add Account`에서 제공자를 고릅니다. 새 계정 카드에 설정 디렉터리를 입력합니다. 레이블은 생략할 수 있습니다. 기본 디렉터리는 `~/.claude`, `~/.codex`입니다.
 
-`Settings… → Data collection → Codex → CLI path (optional)`를 비워 두면 Homebrew 경로와 `~/.local/bin/codex`, `PATH`에서 탐색합니다.
+두 제공자 모두 `CLI path (optional)`를 비워 두면 [실행 파일을 자동으로 탐색](docs/collection.md#cli-discovery-and-configuration)합니다.
 
 ### 선택 설정
 

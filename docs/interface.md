@@ -74,6 +74,6 @@ The logos identify account providers. Deltavee is not an official Anthropic or O
 | `Launch at login` | Applies immediately. If macOS approval is needed, a warning links to Login Items. A failed change restores the actual state and shows guidance. |
 | `Interval` | Refresh every 3, 5, 10 (default), 15, or 30 minutes. |
 | Claude `Source` | `OAuth + Statusline` or `Statusline Only`; see [Claude Source Modes](collection.md#claude-source-modes) for fallback behavior, costs, and restrictions. |
-| Codex `CLI path (optional)` | Leave empty for automatic discovery. |
+| Claude / Codex `CLI path (optional)` | Override the executable for that provider; leave empty for automatic discovery. See [CLI Discovery and Configuration](collection.md#cli-discovery-and-configuration). |
 
 The Claude and Codex cards have expandable `Terms and details` explaining collection and policy caveats. Credentials and account tokens are not displayed or editable here. Read [Provider Terms and Account Risk](collection.md#provider-terms-and-account-risk) before choosing a collection mode.

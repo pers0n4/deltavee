@@ -43,7 +43,7 @@ It tracks several Claude and Codex accounts side by side, including more than on
 ## How It Collects Usage
 
 - Codex: Runs the Codex CLI for each account to fetch weekly limits. The app does not read or write `auth.json`. OpenAI permits app-server authentication for local or open-source apps, but not for commercial or hosted services ([Codex app-server](https://learn.chatgpt.com/docs/app-server#auth-endpoints)).
-- Claude: Fetches usage through an unofficial API with the CLI's credentials, falling back to statusline records on failure. The app does not use refresh tokens or store credentials. When the access token expires, it runs Claude Code to refresh it. Each run consumes usage for one Haiku model request.
+- Claude: Fetches usage through an unofficial API with the CLI's credentials, falling back to statusline records on failure. The app does not use refresh tokens or store credentials. When the access token expires, it can run Claude Code in the background; see [token refresh and usage costs](docs/collection.md#claude-token-expiration-and-cli-refresh).
 - Collects weekly usage only. Five-hour and other limits are not shown.
 - App data is stored in `~/Library/Application Support/dev.pers0n4.deltavee/`. Tokens are not stored.
 
@@ -60,7 +60,7 @@ See [collection details](docs/collection.md) for refresh behavior, data storage,
 
 - macOS 26 or later
 - Xcode 26 or later, to build from source
-- Claude Code or the Codex CLI installed
+- [Claude Code CLI](docs/collection.md#set-up-claude-code-cli-for-desktop-users) or [Codex CLI](docs/collection.md#install-codex-cli-without-nodejs) installed
 - [mise](https://mise.jdx.dev/) (optional, for mise installation or source build tasks)
 
 ### Install
@@ -141,7 +141,7 @@ Before adding accounts, read [How It Collects Usage](#how-it-collects-usage), in
 
 2. Open `Accounts…` at the bottom of the panel and choose a provider from `Add Account`. Enter the config directory in the new account card; you can leave the label blank. The default directories are `~/.claude` and `~/.codex`.
 
-If `Settings… → Data collection → Codex → CLI path (optional)` is left empty, the app searches Homebrew paths, `~/.local/bin/codex`, and `PATH`.
+For either provider, leave `CLI path (optional)` empty for [automatic discovery](docs/collection.md#cli-discovery-and-configuration).
 
 ### Optional Settings
 
