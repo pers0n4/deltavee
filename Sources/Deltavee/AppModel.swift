@@ -38,7 +38,10 @@ final class AppModel {
       Scheduler(
         codex: CodexAppServerCollector(executable: {
           Executables.resolveCodex(configured: settings.codexPath)
-        }), claude: ClaudeUsageCollector(source: settings.claudeSource))
+        }),
+        claude: ClaudeUsageCollector(
+          source: settings.claudeSource,
+          claudePath: { Executables.resolveClaude(configured: settings.claudePath) }))
     },
     clock: any Clock<Duration> = ContinuousClock(), updates: UpdateModel? = nil
   ) {
@@ -213,6 +216,7 @@ final class AppModel {
     }
     let sources: [Source]
     let claudeSource: ClaudeSource
+    let claudePath: String
     let codexPath: String
     let interval: Double
     init(_ document: AccountDocument) {
@@ -220,6 +224,7 @@ final class AppModel {
         .map { Source(id: $0.id, provider: $0.provider, directory: $0.expandedDirectory) }
         .sorted { $0.id.uuidString < $1.id.uuidString }
       claudeSource = document.settings.claudeSource
+      claudePath = document.settings.claudePath
       codexPath = document.settings.codexPath
       interval = document.settings.validInterval
     }

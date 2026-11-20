@@ -27,6 +27,23 @@ final class ProcessesTests: CoreTestCase {
     XCTAssertEqual(
       Executables.resolve("codex", preferred: [configured], home: home.path, path: ""), configured)
   }
+
+  func testConfiguredClaudeExecutableTakesPrecedenceWithoutFallback() throws {
+    let home = try temporaryDirectory()
+    let bin = home.appendingPathComponent("bin")
+    try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: false)
+    let discovered = bin.appendingPathComponent("claude")
+    try FileManager.default.createSymbolicLink(
+      at: discovered, withDestinationURL: URL(fileURLWithPath: "/bin/sh"))
+    let configured = home.appendingPathComponent("custom claude")
+    try FileManager.default.createSymbolicLink(at: configured, withDestinationURL: discovered)
+    XCTAssertEqual(
+      Executables.resolveClaude(configured: configured.path, home: home.path, path: bin.path),
+      configured.path)
+    XCTAssertNil(
+      Executables.resolveClaude(
+        configured: home.appendingPathComponent("missing").path, home: home.path, path: bin.path))
+  }
   func testLiveRunnerUsesRequestedWorkingDirectory() async throws {
     let directory = try temporaryDirectory()
     let output = try await LiveCommandRunner().run(

@@ -46,7 +46,7 @@ final class SettingsNavigationTests: XCTestCase {
       try await self.settle(window)
       let settingsFields = self.editableFields(in: window.contentView!).map(\.stringValue)
       XCTAssertEqual(
-        Set(settingsFields), ["/fake/original-codex"],
+        settingsFields, ["", "/fake/original-codex"],
         "One scrolling Settings screen holds display and collection editors, but no accounts")
       XCTAssertLessThanOrEqual(window.contentLayoutRect.height, 600)
       XCTAssertEqual(window.contentLayoutRect.width, PanelView.width, accuracy: 1)
@@ -265,6 +265,18 @@ final class SettingsNavigationTests: XCTestCase {
       try await self.settle(window)
       expected.settings.codexPath = "/fake/return-codex"
       XCTAssertEqual(fixture.model.document, expected, "Return applies the edit")
+
+      let claude = try XCTUnwrap(
+        self.editableFields(in: window.contentView!).first { $0.stringValue.isEmpty })
+      XCTAssertEqual(claude.placeholderString, "Auto-detect")
+      let claudePath = "/fake/mise installations/claude"
+      try self.type(claudePath, into: claude, in: window)
+      XCTAssertEqual(try fixture.store.load(), expected, "Typing alone must not apply")
+      XCTAssertTrue(window.makeFirstResponder(nil))
+      try await self.settle(window)
+      expected.settings.claudePath = claudePath
+      XCTAssertEqual(
+        try fixture.store.load(), expected, "Claude and Codex paths save independently")
 
       _ = try self.typeCodexPath("/fake/escape-codex", replacing: "/fake/return-codex", in: window)
       try self.press("\u{1b}", keyCode: 53, in: window)

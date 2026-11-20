@@ -291,6 +291,7 @@ final class AppModelTests: XCTestCase {
     XCTAssertEqual(try AccountStore(directory: directory).load(), document)
     for change in [
       { (d: inout AccountDocument) in d.settings.codexPath = "/fake/bin/codex" },
+      { $0.settings.claudePath = "/fake/bin/claude" },
       { $0.settings.claudeSource = .statuslineOnly },
       { $0.settings.intervalSeconds = 180 },
       { $0.accounts[0].configDir = "/fake/other" },

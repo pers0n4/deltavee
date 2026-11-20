@@ -58,6 +58,7 @@ final class PersistenceTests: CoreTestCase {
       // A free-form interval saved before the fixed choices snaps to the nearest choice.
       XCTAssertEqual(document.settings.intervalSeconds, 900)
       XCTAssertEqual(document.settings.codexPath, "/fake/bin/codex")
+      XCTAssertEqual(document.settings.claudePath, "")
     }
   }
   func testIntervalSnapsToNearestChoiceWithTiesTakingTheLongerInterval() throws {

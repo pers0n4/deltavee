@@ -323,22 +323,31 @@ public struct LiveCodexRPCTransport: CodexRPCTransport {
 }
 
 public enum Executables {
+  public static func resolveClaude(
+    configured: String? = nil, home: String = NSHomeDirectory(),
+    path: String = ProcessInfo.processInfo.environment["PATH"] ?? ""
+  ) -> String? {
+    resolve(
+      "claude", preferred: ["/opt/homebrew/bin/claude", "/usr/local/bin/claude"], home: home,
+      path: path, configured: configured)
+  }
+
   public static func resolveCodex(
     configured: String? = nil, home: String = NSHomeDirectory(),
     path: String = ProcessInfo.processInfo.environment["PATH"] ?? ""
+  ) -> String? {
+    resolve(
+      "codex", preferred: ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"], home: home,
+      path: path, configured: configured)
+  }
+  public static func resolve(
+    _ name: String, preferred: [String] = [], home: String = NSHomeDirectory(),
+    path: String = ProcessInfo.processInfo.environment["PATH"] ?? "", configured: String? = nil
   ) -> String? {
     if let configured, !configured.isEmpty {
       let path = Paths.absolute(configured)
       return FileManager.default.isExecutableFile(atPath: path) ? path : nil
     }
-    return resolve(
-      "codex", preferred: ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"], home: home,
-      path: path)
-  }
-  public static func resolve(
-    _ name: String, preferred: [String] = [], home: String = NSHomeDirectory(),
-    path: String = ProcessInfo.processInfo.environment["PATH"] ?? ""
-  ) -> String? {
     let local = URL(fileURLWithPath: home).appendingPathComponent(".local/bin")
       .appendingPathComponent(name).path
     let search = preferred + [local] + path.split(separator: ":").map { String($0) + "/" + name }

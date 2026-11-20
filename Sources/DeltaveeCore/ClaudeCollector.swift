@@ -353,10 +353,7 @@ public struct ClaudeUsageCollector: Collector {
     runner: any CommandRunning = LiveCommandRunner(), clock: any UsageClock = SystemClock(),
     source: ClaudeSource = .oauthWithStatusline,
     refresher: (any ClaudeTokenRefreshing)? = ClaudeTokenRefresher.shared,
-    claudePath: @escaping @Sendable () -> String? = {
-      Executables.resolve(
-        "claude", preferred: ["/opt/homebrew/bin/claude", "/usr/local/bin/claude"])
-    }
+    claudePath: @escaping @Sendable () -> String? = { Executables.resolveClaude() }
   ) {
     self.credentials = credentials
     self.transport = transport

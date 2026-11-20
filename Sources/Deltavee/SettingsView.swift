@@ -616,6 +616,7 @@ struct SettingsView: View {
               ).frame(width: 164)
             }
           }.frame(maxWidth: .infinity, alignment: .leading)
+          cliPathField("Claude", value: $draft.document.settings.claudePath)
           if draft.document.settings.claudeSource == .statuslineOnly {
             helpText("Reads local captures only. No tokens or direct provider requests.")
             helpText(
@@ -641,13 +642,7 @@ struct SettingsView: View {
       }
       GroupBox("Codex") {
         VStack(alignment: .leading, spacing: 8) {
-          Text("CLI path (optional)").font(.caption).foregroundStyle(.secondary)
-          CommitTextField(
-            "Auto-detect", value: $draft.document.settings.codexPath,
-            onCommit: apply
-          )
-          .textFieldStyle(.roundedBorder)
-          .accessibilityLabel("Codex CLI path; leave blank to auto-detect")
+          cliPathField("Codex", value: $draft.document.settings.codexPath)
           SettingsTermsDetails {
             VStack(alignment: .leading, spacing: 8) {
               helpText(
@@ -675,6 +670,15 @@ struct SettingsView: View {
           ).frame(width: 124)
         }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+    }
+  }
+
+  private func cliPathField(_ name: String, value: Binding<String>) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("CLI path (optional)").font(.caption).foregroundStyle(.secondary)
+      CommitTextField("Auto-detect", value: value, onCommit: apply)
+        .textFieldStyle(.roundedBorder)
+        .accessibilityLabel("\(name) CLI path; leave blank to auto-detect")
     }
   }
 

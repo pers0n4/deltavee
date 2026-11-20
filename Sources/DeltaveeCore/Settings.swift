@@ -15,6 +15,7 @@ public struct Settings: Codable, Sendable, Equatable {
   public var timeFormat: TimeFormat = .auto
   public var claudeSource: ClaudeSource = .oauthWithStatusline
   public var intervalSeconds: Double = 600
+  public var claudePath: String = ""
   public var codexPath: String = ""
   /// Tints the menu bar percentages with the weekly graph's severity colors.
   public var colorMenuBarUsage: Bool = false
@@ -25,6 +26,7 @@ public struct Settings: Codable, Sendable, Equatable {
   public init() {}
   private enum CodingKeys: String, CodingKey {
     case mode, resetTimeMode, updatedTimeMode, timeFormat, claudeSource, intervalSeconds, codexPath
+    case claudePath
     case colorMenuBarUsage, transparentPanel, theme
   }
   public init(from decoder: Decoder) throws {
@@ -35,6 +37,7 @@ public struct Settings: Codable, Sendable, Equatable {
     intervalSeconds = Self.nearestInterval(
       to: try container.decode(Double.self, forKey: .intervalSeconds))
     codexPath = try container.decode(String.self, forKey: .codexPath)
+    claudePath = try container.decodeIfPresent(String.self, forKey: .claudePath) ?? ""
     // Documents saved before the reset-time preference have no value for this key.
     resetTimeMode =
       try container.decodeIfPresent(TimeDisplayMode.self, forKey: .resetTimeMode) ?? .absolute
