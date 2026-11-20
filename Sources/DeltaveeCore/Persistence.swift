@@ -29,7 +29,14 @@ public struct SnapshotStore: Sendable {
     return try JSONDecoder().decode([UUID: AccountState].self, from: Data(contentsOf: file))
   }
   public func save(_ states: [UUID: AccountState]) throws {
-    try Persistence.save(states, file: directory.appendingPathComponent("snapshots.json"))
+    // Keep the transient startup diagnostic readable by older versions of Deltavee.
+    var compatible = states
+    for (id, state) in states {
+      if case .failed(.codexNodeNotFound, let lastSuccess) = state {
+        compatible[id] = .failed(.process, lastSuccess: lastSuccess)
+      }
+    }
+    try Persistence.save(compatible, file: directory.appendingPathComponent("snapshots.json"))
   }
 }
 /// Per-account time before which collection must not be retried after a rate limit.

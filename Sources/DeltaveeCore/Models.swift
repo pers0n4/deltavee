@@ -137,6 +137,7 @@ public enum FailureKind: Codable, Equatable, Sendable {
   case binaryNotFound, schema, rateLimited
   case http(Int)
   case timeout, process, transport, authRequired, statuslineMissing
+  case codexNodeNotFound
   /// The stored access token passed its expiry; running the CLI refreshes it without signing in.
   case tokenExpired
 }
@@ -202,6 +203,8 @@ public enum AccountState: Codable, Equatable, Sendable {
       case .http(let code): "HTTP error \(code)"
       case .timeout: "Response timed out"
       case .process: "CLI execution error"
+      case .codexNodeNotFound:
+        "Codex cannot find Node.js. Install the standalone Codex CLI or set a working CLI path."
       case .transport: "Connection error"
       case .authRequired: "Sign-in required"
       case .tokenExpired: "Token expired"

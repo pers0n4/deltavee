@@ -265,4 +265,12 @@ final class PersistenceTests: CoreTestCase {
     XCTAssertEqual(restored[a.id]?.lastSuccess?.observedAt, now.addingTimeInterval(-7200))
     XCTAssertTrue(restored[a.id]!.lastSuccess!.isStale(now: now))
   }
+
+  func testSnapshotStorePreservesUsageWhenSavingTransientCodexDiagnostic() throws {
+    let store = try SnapshotStore(directory: temporaryDirectory())
+    let id = account().id
+    let previous = snapshot(observedAt: now)
+    try store.save([id: .failed(.codexNodeNotFound, lastSuccess: previous)])
+    XCTAssertEqual(try store.load()[id], .failed(.process, lastSuccess: previous))
+  }
 }

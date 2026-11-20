@@ -112,6 +112,53 @@ private enum ProcessIO {
   }
 }
 
+// The serial queue owns stderr reads and the diagnostic prefix. The source closes the
+// read handle on that queue after its last event, so cancellation cannot race a read.
+private final class CodexStartupStderr: @unchecked Sendable {
+  // Verified with macOS /usr/bin/env on 2026-11-20: missing Node prints this line.
+  private static let missingNode = "env: node: No such file or directory\n"
+  let pipe: Pipe
+  private let queue = DispatchQueue(label: "dev.pers0n4.deltavee.codex-stderr")
+  private let source: DispatchSourceRead
+  private var prefix = Data()
+  private var finished = false
+
+  init?() {
+    let pipe = Pipe()
+    let reader = pipe.fileHandleForReading
+    let fd = reader.fileDescriptor
+    guard fcntl(fd, F_SETFL, O_NONBLOCK) == 0 else { return nil }
+    self.pipe = pipe
+    source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
+    source.setEventHandler { [weak self] in self?.drain(fd) }
+    source.setCancelHandler { try? reader.close() }
+    source.activate()
+  }
+
+  deinit { source.cancel() }
+
+  var nodeNotFound: Bool {
+    queue.sync {
+      if !finished { drain(pipe.fileHandleForReading.fileDescriptor) }
+      return prefix.elementsEqual(Self.missingNode.utf8)
+    }
+  }
+
+  private func drain(_ fd: Int32) {
+    guard !finished else { return }
+    withUnsafeTemporaryAllocation(of: UInt8.self, capacity: 4096) { bytes in
+      let count = Darwin.read(fd, bytes.baseAddress, bytes.count)
+      if count > 0 {
+        let remaining = Self.missingNode.utf8.count - prefix.count
+        prefix.append(contentsOf: bytes.prefix(min(count, remaining)))
+      } else if count == 0 {
+        finished = true
+        source.cancel()
+      }
+    }
+  }
+}
+
 /// Child CLIs inherit only an allowlist of the app's environment, so credentials and endpoint overrides
 /// from a launching shell (for example `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`,
 /// `OPENAI_API_KEY`) never switch a CLI away from the account's stored login. Account-scoped directories
@@ -129,6 +176,15 @@ public enum ProcessEnvironment {
     let base = inherited.filter { inheritedKeys.contains($0.key) || $0.key.hasPrefix("LC_") }
     return base.merging(explicit) { _, new in new }
   }
+
+  fileprivate static func child(explicit: [String: String], launchURL: URL) -> [String: String] {
+    var environment = child(explicit: explicit)
+    // npm launchers can be symlinks. The interpreter may live beside the link, not its target.
+    let launchDirectory = launchURL.deletingLastPathComponent().path
+    let path = environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+    environment["PATH"] = path.isEmpty ? launchDirectory : "\(path):\(launchDirectory)"
+    return environment
+  }
 }
 
 public struct LiveCommandRunner: CommandRunning {
@@ -141,9 +197,11 @@ public struct LiveCommandRunner: CommandRunning {
     return try await withTaskCancellationHandler {
       try await ProcessIO.blocking {
         let output = Pipe()
-        owner.process.executableURL = URL(fileURLWithPath: executable)
+        let launchURL = URL(fileURLWithPath: executable)
+        owner.process.executableURL = launchURL
         owner.process.arguments = arguments
-        owner.process.environment = ProcessEnvironment.child(explicit: environment)
+        owner.process.environment = ProcessEnvironment.child(
+          explicit: environment, launchURL: launchURL)
         if let currentDirectory { owner.process.currentDirectoryURL = currentDirectory }
         owner.process.standardOutput = output
         owner.process.standardError = FileHandle.nullDevice
@@ -181,14 +239,22 @@ public struct LiveCodexRPCTransport: CodexRPCTransport {
       try await ProcessIO.blocking {
         let input = Pipe()
         let output = Pipe()
-        owner.process.executableURL = URL(fileURLWithPath: executable)
+        let launchURL = URL(fileURLWithPath: executable)
+        owner.process.executableURL = launchURL
         owner.process.arguments = ["-s", "read-only", "-a", "never", "app-server"]
-        owner.process.environment = ProcessEnvironment.child(explicit: ["CODEX_HOME": configDir])
+        owner.process.environment = ProcessEnvironment.child(
+          explicit: ["CODEX_HOME": configDir], launchURL: launchURL)
         owner.process.standardInput = input
         owner.process.standardOutput = output
-        owner.process.standardError = FileHandle.nullDevice
+        let stderr = CodexStartupStderr()
+        if let stderr {
+          owner.process.standardError = stderr.pipe
+        } else {
+          owner.process.standardError = FileHandle.nullDevice
+        }
         let deadline = DispatchWorkItem { owner.stop() }
         DispatchQueue.global().asyncAfter(deadline: .now() + 20, execute: deadline)
+        defer { withExtendedLifetime(stderr) {} }
         defer {
           try? input.fileHandleForWriting.close()
           owner.shutdown(grace: 3)
@@ -223,11 +289,20 @@ public struct LiveCodexRPCTransport: CodexRPCTransport {
           }
           throw CollectError(owner.timedOut ? .timeout : .process)
         }
-        try send([
-          "id": 1, "method": "initialize",
-          "params": ["clientInfo": ["name": "deltavee", "version": "0.1.0"]],
-        ])
-        let initialized = try response(id: 1)
+        let initialized: Data
+        do {
+          try send([
+            "id": 1, "method": "initialize",
+            "params": ["clientInfo": ["name": "deltavee", "version": "0.1.0"]],
+          ])
+          initialized = try response(id: 1)
+        } catch {
+          let kind = (error as? CollectError)?.kind ?? .process
+          if kind == .process, !owner.timedOut, stderr?.nodeNotFound == true {
+            throw CollectError(.codexNodeNotFound)
+          }
+          throw error
+        }
         if let object = try JSONSerialization.jsonObject(with: initialized) as? [String: Any],
           object["error"] != nil
         {

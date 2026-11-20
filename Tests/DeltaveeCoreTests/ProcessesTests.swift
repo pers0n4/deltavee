@@ -59,6 +59,81 @@ final class ProcessesTests: CoreTestCase {
     XCTAssertFalse(
       FileManager.default.fileExists(atPath: directory.appendingPathComponent("term").path))
   }
+  func testClaudeVersionFindsInterpreterBesideSymlinkedCLI() async throws {
+    let directory = try temporaryDirectory()
+    let executable = try symlinkedLauncher(
+      "claude", in: directory, body: "printf '%s\\n' '2.1.0 (Claude Code)'")
+    let result = try await LiveCommandRunner().run(
+      executable: executable.path, arguments: ["--version"],
+      environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"], timeout: 5)
+    XCTAssertEqual(result.status, 0)
+    XCTAssertEqual(String(decoding: result.data, as: UTF8.self), "2.1.0 (Claude Code)\n")
+  }
+
+  func testRPCFindsInterpreterBesideSymlinkedCLI() async throws {
+    let (directory, _) = try rpcFixture(mode: "natural")
+    let executable = try symlinkedLauncher(
+      "codex", in: directory, body: #"exec "$CODEX_HOME/fake-rpc" "$@""#)
+    let data = try await LiveCodexRPCTransport().rateLimits(
+      executable: executable.path, configDir: directory.path)
+    XCTAssertEqual(try CodexAppServerCollector.parse(data, now: now).weeklyUsedPercent, 31)
+  }
+
+  private func symlinkedLauncher(_ name: String, in directory: URL, body: String) throws -> URL {
+    let bin = directory.appendingPathComponent("bin")
+    let fileManager = FileManager.default
+    try fileManager.createDirectory(at: bin, withIntermediateDirectories: false)
+    // Use a unique interpreter name so a developer's Node installation cannot mask the regression.
+    let interpreter = "deltavee-test-\(UUID().uuidString)"
+    try fileManager.createSymbolicLink(
+      at: bin.appendingPathComponent(interpreter),
+      withDestinationURL: URL(fileURLWithPath: "/bin/sh"))
+    let script = directory.appendingPathComponent("\(name).sh")
+    try Data("#!/usr/bin/env \(interpreter)\n\(body)\n".utf8).write(to: script)
+    try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+    let executable = bin.appendingPathComponent(name)
+    try fileManager.createSymbolicLink(at: executable, withDestinationURL: script)
+    return executable
+  }
+  func testMissingNodeShowsStandaloneInstallationAdvice() async throws {
+    let directory = try temporaryDirectory()
+    let executable = directory.appendingPathComponent("codex")
+    try Data("#!/bin/sh\nPATH=\"$CODEX_HOME\" exec /usr/bin/env node \"$@\"\n".utf8)
+      .write(to: executable)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o700], ofItemAtPath: executable.path)
+
+    do {
+      _ = try await LiveCodexRPCTransport().rateLimits(
+        executable: executable.path, configDir: directory.path)
+      XCTFail("Expected the Codex launcher to fail without Node.js")
+    } catch {
+      let kind = (error as? CollectError)?.kind ?? .process
+      XCTAssertEqual(
+        AccountState.failed(kind, lastSuccess: nil).message,
+        "Codex cannot find Node.js. Install the standalone Codex CLI or set a working CLI path.")
+    }
+  }
+  func testUnrelatedStderrDoesNotBlockOrAppearAsMissingNode() async throws {
+    let directory = try temporaryDirectory()
+    let executable = directory.appendingPathComponent("codex")
+    let script = """
+      #!/bin/sh
+      /bin/dd if=/dev/zero bs=65536 count=16 1>&2 2>/dev/null
+      exit 127
+      """
+    try Data(script.utf8).write(to: executable)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o700], ofItemAtPath: executable.path)
+
+    do {
+      _ = try await LiveCodexRPCTransport().rateLimits(
+        executable: executable.path, configDir: directory.path)
+      XCTFail("Expected the Codex launcher to fail")
+    } catch let error as CollectError {
+      XCTAssertEqual(error.kind, .process)
+    }
+  }
   func testRPCGraceThenTERMAllowsCleanup() async throws {
     let (directory, executable) = try rpcFixture(mode: "term")
     let start = ProcessInfo.processInfo.systemUptime
