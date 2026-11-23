@@ -190,6 +190,7 @@ final class MenuPanelController {
   func hide() {
     guard isPresented else { return }
     isPresented = false
+    model.updates.dismissManualFeedback()
     awaitingPresentation = false
     transitionID = UUID()
     let closing = transitionID

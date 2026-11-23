@@ -69,12 +69,6 @@ struct PanelView: View {
       }
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
-          if model.updates.showsNotice {
-            UpdateNoticeView(
-              state: model.updates.state, showsStatus: model.updates.hasRequestedCheck
-            ).padding(16)
-            Divider()
-          }
           if model.document.accounts.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
               Text("No accounts yet. Sign in with each provider's CLI, then add the account.")
@@ -139,6 +133,21 @@ struct PanelView: View {
           }
           .disabled(model.updates.state.status.isChecking)
           .help("Check GitHub for a new release. Downloads and installation are manual.")
+          let release = model.updates.state.availableRelease
+          let feedback = model.updates.manualFeedback
+          if release != nil || feedback != nil {
+            VStack(alignment: .leading, spacing: 4) {
+              if let release {
+                UpdateNoticeView(release: release)
+              }
+              if let feedback {
+                UpdateCheckFeedbackView(status: feedback)
+              }
+            }
+            .padding(.leading, 36)
+            .padding(.trailing, 10)
+            .padding(.bottom, 4)
+          }
           Divider().padding(.vertical, 2)
           Button(action: { NSApp.terminate(nil) }) {
             actionLabel("Quit Deltavee", symbol: "power", shortcut: "⌘Q")

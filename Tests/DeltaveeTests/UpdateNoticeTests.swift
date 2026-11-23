@@ -45,24 +45,58 @@ final class UpdateNoticeTests: XCTestCase {
   }
 
   @MainActor
-  func testAutomaticCurrentAndErrorStatesStayQuietButAvailableAndManualStatesShowTheNotice() throws
-  {
+  func testOnlyManualChecksShowFooterFeedback() throws {
     let current = try XCTUnwrap(StableVersion("0.1.0"))
-    XCTAssertFalse(UpdateModel(initialState: UpdateState(status: .current(current))).showsNotice)
-    XCTAssertFalse(
-      UpdateModel(initialState: UpdateState(status: .unavailable(.network))).showsNotice)
-    XCTAssertTrue(
-      UpdateModel(initialState: UpdateState(status: .available(try release()))).showsNotice)
-    XCTAssertTrue(
+    XCTAssertNil(UpdateModel(initialState: UpdateState(status: .current(current))).manualFeedback)
+    XCTAssertNil(
+      UpdateModel(initialState: UpdateState(status: .unavailable(.network))).manualFeedback)
+    XCTAssertNil(
+      UpdateModel(
+        initialState: UpdateState(status: .available(try release())), hasRequestedCheck: true
+      ).manualFeedback)
+    XCTAssertEqual(
       UpdateModel(
         initialState: UpdateState(status: .unavailable(.network)), hasRequestedCheck: true
-      )
-      .showsNotice)
+      ).manualFeedback, .unavailable(.network))
     XCTAssertNotEqual(
-      UpdateNoticeView.statusMessage(for: .unavailable(.noRelease)),
-      UpdateNoticeView.statusMessage(for: .current(current)))
+      UpdateCheckFeedbackView.statusMessage(for: .unavailable(.noRelease)),
+      UpdateCheckFeedbackView.statusMessage(for: .current(current)))
     XCTAssertTrue(
-      UpdateNoticeView.statusMessage(for: .unavailable(.configuration)).contains("this build"))
+      UpdateCheckFeedbackView.statusMessage(for: .unavailable(.configuration)).contains(
+        "this build"))
+  }
+
+  @MainActor
+  func testClosingPanelClearsManualFeedbackButKeepsAnAvailableRelease() throws {
+    _ = NSApplication.shared
+    let anchor = TestPanelAnchor()
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let current = try XCTUnwrap(StableVersion("0.1.0"))
+    let available = try release()
+    let states = [
+      UpdateState(status: .current(current)),
+      UpdateState(status: .checking),
+      UpdateState(status: .unavailable(.network), availableRelease: available),
+    ]
+    for state in states {
+      let updates = UpdateModel(initialState: state, hasRequestedCheck: true)
+      let model = AppModel(
+        accountStore: AccountStore(directory: directory),
+        snapshotStore: SnapshotStore(directory: directory), updates: updates)
+      let controller = MenuPanelController(
+        model: model, button: { anchor.button }, reduceMotion: { true },
+        monitorsSystemEvents: false, screen: anchor.screen)
+      defer { controller.shutdown() }
+
+      controller.show()
+      XCTAssertTrue(controller.isPresented)
+      XCTAssertEqual(updates.manualFeedback, state.status)
+      controller.hide()
+      controller.show()
+      XCTAssertTrue(controller.isPresented)
+      XCTAssertNil(updates.manualFeedback, "Manual feedback must not return on reopen")
+      XCTAssertEqual(updates.state.availableRelease, state.availableRelease)
+    }
   }
 
   @MainActor
@@ -94,8 +128,7 @@ final class UpdateNoticeTests: XCTestCase {
         && updates.state.status == .unavailable(.network)
     }
     XCTAssertEqual(model.notice, "Account settings need attention.")
-    XCTAssertTrue(updates.hasRequestedCheck)
-    XCTAssertTrue(updates.showsNotice)
+    XCTAssertEqual(updates.manualFeedback, .unavailable(.network))
     await updates.checkNow()
     let count = await http.count
     XCTAssertEqual(count, 2, "A failed manual check remains retryable")
@@ -151,34 +184,76 @@ final class UpdateNoticeTests: XCTestCase {
   }
 
   @MainActor
-  func testAvailableNoticeRemainsInsideTheScrollAreaAtTheHeightLimit() async throws {
+  func testAvailableReleaseLinkStaysOutsideTheCappedAccountScrollArea() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let model = AppModel(
-      accountStore: AccountStore(directory: directory),
-      snapshotStore: SnapshotStore(directory: directory),
-      updates: UpdateModel(initialState: UpdateState(status: .available(try release()))))
-    model.document.accounts = (0..<8).map {
-      Account(name: "Test \($0)", provider: .openai, configDir: "/fake/\($0)", order: $0)
+    let current = try XCTUnwrap(StableVersion("0.1.0"))
+    let available = try release()
+    var scrollSizes: [(viewport: CGFloat, document: CGFloat)] = []
+    for status in [UpdateStatus.current(current), .available(available)] {
+      let model = AppModel(
+        accountStore: AccountStore(directory: directory),
+        snapshotStore: SnapshotStore(directory: directory),
+        updates: UpdateModel(initialState: UpdateState(status: status)))
+      model.document.accounts = (0..<8).map {
+        Account(name: "Test \($0)", provider: .openai, configDir: "/fake/\($0)", order: $0)
+      }
+      let window = makeWindow(model: model, maxHeight: 360, appearance: .aqua)
+      defer {
+        window.contentView = nil
+        window.close()
+      }
+      try await settle(window)
+      XCTAssertEqual(window.contentLayoutRect.height, 360, accuracy: 1)
+      let scroll = try XCTUnwrap(findScroll(in: XCTUnwrap(window.contentView)))
+      let document = try XCTUnwrap(scroll.documentView).bounds.height
+      let viewport = scroll.contentView.bounds.height
+      XCTAssertGreaterThan(document, viewport)
+      XCTAssertGreaterThan(viewport, 1)
+      scrollSizes.append((viewport, document))
     }
-    let window = makeWindow(model: model, maxHeight: 360, appearance: .aqua)
-    defer {
-      window.contentView = nil
-      window.close()
+    XCTAssertLessThan(scrollSizes[1].viewport, scrollSizes[0].viewport)
+    XCTAssertEqual(scrollSizes[1].document, scrollSizes[0].document, accuracy: 1)
+  }
+
+  @MainActor
+  func testManualFeedbackStaysInFooterWhenAccountListIsCapped() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let current = try XCTUnwrap(StableVersion("0.1.0"))
+    let available = try release()
+    let cases: [UpdateStatus] = [.checking, .current(current), .unavailable(.network)]
+    var baseline: CGFloat?
+    for status in [UpdateStatus.available(available)] + cases {
+      let updates = UpdateModel(
+        initialState: UpdateState(status: status, availableRelease: available),
+        hasRequestedCheck: true)
+      let model = AppModel(
+        accountStore: AccountStore(directory: directory),
+        snapshotStore: SnapshotStore(directory: directory), updates: updates)
+      model.document.accounts = (0..<8).map {
+        Account(name: "Test \($0)", provider: .openai, configDir: "/fake/\($0)", order: $0)
+      }
+      let window = makeWindow(model: model, maxHeight: 360, appearance: .aqua)
+      defer {
+        window.contentView = nil
+        window.close()
+      }
+      try await settle(window)
+      XCTAssertEqual(window.contentLayoutRect.height, 360, accuracy: 1)
+      let scroll = try XCTUnwrap(findScroll(in: XCTUnwrap(window.contentView)))
+      let height = scroll.contentView.bounds.height
+      if let baseline {
+        XCTAssertLessThan(height, baseline, "Manual feedback must take up space in the footer")
+      } else {
+        baseline = height
+      }
     }
-    try await settle(window)
-    XCTAssertEqual(window.contentLayoutRect.height, 360, accuracy: 1)
-    let scroll = try XCTUnwrap(findScroll(in: XCTUnwrap(window.contentView)))
-    XCTAssertGreaterThan(
-      try XCTUnwrap(scroll.documentView).bounds.height, scroll.contentView.bounds.height)
-    XCTAssertGreaterThan(scroll.contentView.bounds.height, 1)
   }
 
   @MainActor
   func testNoticeWrapsRatherThanShrinkingAtNarrowWidthsAndLongVersions() throws {
     _ = NSApplication.shared
     let long = try release(tag: "v18446744073709551616.18446744073709551616.18446744073709551616")
-    let view = UpdateNoticeView(state: UpdateState(status: .available(long)), showsStatus: true)
+    let view = UpdateNoticeView(release: long)
     let wide = NSHostingView(rootView: view.frame(width: 288)).fittingSize
     let narrow = NSHostingView(rootView: view.frame(width: 160)).fittingSize
     XCTAssertEqual(wide.width, 288, accuracy: 1)

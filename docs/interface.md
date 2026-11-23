@@ -14,7 +14,8 @@ See the [Deltavee README](../README.md) for installation and [Collection Behavio
 
 - `Check for Updates` checks for a new stable release. The app also checks at startup and every 24 hours. After a temporary failure, it retries after 30 minutes, up to twice per cycle. Drafts and prereleases do not produce notices.
 - Checking, up to date, new release available, and check failed are distinct states, separate from usage refresh status. A failed or unavailable check does not mean the app is up to date; you can check again manually.
-- A new-release notice shows the version and a link to its GitHub Release page. The browser opens only when you select the link. Downloads and installation are manual; there are no automatic downloads or installations, macOS notification permission requests, or system banners. See the [README's installation instructions](../README.md).
+- Progress, up-to-date, and failure messages from a manual check appear below `Check for Updates` and clear when you close the panel. Closing the panel does not cancel the check.
+- When a new release is available, a versioned GitHub link appears below `Check for Updates` and remains when you reopen the panel. You can still check again manually. The browser opens only when you select the link. Downloads and installation are manual; there are no automatic downloads or installations, macOS notification permission requests, or system banners. See the [README's installation instructions](../README.md).
 - Update checks contact the public GitHub API for `pers0n4/deltavee`. They are separate from Claude usage collection and still run in `Statusline Only`. No credentials, tokens, usage data, or account information are sent. GitHub receives ordinary HTTPS request metadata, including your IP address and User-Agent.
 
 ## Menu Bar

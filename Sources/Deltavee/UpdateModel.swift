@@ -6,8 +6,12 @@ import Observation
 @Observable
 final class UpdateModel {
   private(set) var state: UpdateState
-  private(set) var hasRequestedCheck: Bool
-  var showsNotice: Bool { state.availableRelease != nil || hasRequestedCheck }
+  private var hasRequestedCheck: Bool
+  var manualFeedback: UpdateStatus? {
+    guard hasRequestedCheck else { return nil }
+    if case .available = state.status { return nil }
+    return state.status
+  }
   @ObservationIgnored private let checker: UpdateChecker
   @ObservationIgnored private var observationTask: Task<Void, Never>?
   @ObservationIgnored private var startupTask: Task<Void, Never>?
@@ -48,6 +52,10 @@ final class UpdateModel {
     hasRequestedCheck = true
     observe()
     _ = await checker.checkNow()
+  }
+
+  func dismissManualFeedback() {
+    hasRequestedCheck = false
   }
 
   /// Drains the cancelled request before application termination, including its final safe log entry.

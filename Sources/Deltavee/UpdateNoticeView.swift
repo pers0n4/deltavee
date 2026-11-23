@@ -1,40 +1,37 @@
 import DeltaveeCore
 import SwiftUI
 
-/// Scrollable panel content, not a system notification. The only action opens a validated release page.
+/// Opens the validated release page without downloading or installing the update.
 struct UpdateNoticeView: View {
-  let state: UpdateState
-  let showsStatus: Bool
+  let release: ReleaseUpdate
   var body: some View {
-    let message = showsStatus ? Self.statusMessage(for: state.status) : ""
-    return VStack(alignment: .leading, spacing: 6) {
-      if let release = state.availableRelease {
-        Text("Deltavee \(release.version.description) is available")
-          .font(.callout.weight(.medium))
-          .fixedSize(horizontal: false, vertical: true)
-        Link(destination: release.releaseURL) {
-          Label("View Release on GitHub", systemImage: "arrow.up.right.square")
-        }
-        .font(.callout)
-        .accessibilityLabel("View Deltavee \(release.version.description) release on GitHub")
-        .help("Open the official release page in your browser. Download and install manually.")
-        Text("Download and install manually.")
-          .font(.caption).foregroundStyle(.secondary)
+    Link(destination: release.releaseURL) {
+      Text(
+        "View Deltavee \(release.version.description) on GitHub \(Image(systemName: "arrow.up.right"))"
+      )
+      .font(.caption)
+      .foregroundStyle(Color.accentColor)
+      .fixedSize(horizontal: false, vertical: true)
+    }
+    .buttonStyle(.plain)
+    .help("Open the official release page in your browser. Download and install manually.")
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
+struct UpdateCheckFeedbackView: View {
+  let status: UpdateStatus
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 6) {
+      if status.isChecking {
+        ProgressView().controlSize(.mini).accessibilityHidden(true)
       }
-      if !message.isEmpty {
-        HStack(alignment: .top, spacing: 6) {
-          if state.status.isChecking {
-            ProgressView().controlSize(.mini).accessibilityLabel("Checking for updates")
-          }
-          Text(message)
-            .font(.caption).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-      }
+      Text(Self.statusMessage(for: status))
+        .font(.caption).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .fixedSize(horizontal: false, vertical: true)
-    .accessibilityElement(children: .contain)
   }
 
   static func statusMessage(for status: UpdateStatus) -> String {
