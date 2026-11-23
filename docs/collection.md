@@ -50,6 +50,8 @@ The next scheduled fetch rereads credentials; a completed CLI process alone does
 
 Automatic refresh does not run in Statusline Only mode or when the Claude executable is unavailable.
 
+This also works with a mise-installed Claude Code CLI. If automatic discovery does not find it, [set the CLI path](#cli-discovery-and-configuration). With a valid CLI login, a successful background refresh lets Deltavee resume fetching the weekly quota without an interactive session.
+
 ## Set Up Claude Code CLI for Desktop Users
 
 Deltavee does not read usage directly from Claude Desktop. If you only use Desktop, install the [Claude Code CLI](https://code.claude.com/docs/en/quickstart#step-1-install-claude-code) in addition to the desktop app:
