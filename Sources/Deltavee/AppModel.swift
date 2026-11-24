@@ -22,9 +22,10 @@ final class AppModel {
   let updates: UpdateModel
   @ObservationIgnored private let accountStore: AccountStore
   @ObservationIgnored private let snapshotStore: SnapshotStore
-  @ObservationIgnored private let rateLimitStore: RateLimitStore
-  /// Per-account rate-limit release times, kept across scheduler restarts and app relaunches.
-  private(set) var rateLimitHolds: [UUID: Date] = [:]
+  @ObservationIgnored private let claudeRateLimitStore: ClaudeRateLimitStore
+  /// One release time for every Claude account after any of them got a 429 from the OAuth usage
+  /// endpoint (see `ClaudeRateLimitStore`), kept across scheduler restarts and app relaunches.
+  private(set) var claudeRateLimitRelease: Date?
   @ObservationIgnored private let makeScheduler: (DeltaveeCore.Settings) -> Scheduler
   @ObservationIgnored private var scheduler: Scheduler?
   @ObservationIgnored private var generation = UUID()
@@ -53,7 +54,7 @@ final class AppModel {
     self.updates = updates ?? UpdateModel()
     self.accountStore = accountStore
     self.snapshotStore = snapshotStore
-    rateLimitStore = RateLimitStore(directory: snapshotStore.directory)
+    claudeRateLimitStore = ClaudeRateLimitStore(directory: snapshotStore.directory)
     self.makeScheduler = makeScheduler
     do { document = try accountStore.load() } catch {
       let file = accountStore.directory.appendingPathComponent("accounts.json")
@@ -73,17 +74,23 @@ final class AppModel {
         separator: "\n")
     }
     // An unreadable file only loses the wait; the next 429 records a fresh release time.
-    rateLimitHolds = (try? rateLimitStore.load()) ?? [:]
+    claudeRateLimitRelease = try? claudeRateLimitStore.load(accounts: document.accounts)
+  }
+  /// The release time this account's next fetch waits for: the shared Claude wait, for a Claude
+  /// account in an OAuth mode while it lasts.
+  func rateLimitRelease(for id: UUID, now: Date = Date()) -> Date? {
+    guard let release = claudeRateLimitRelease, release > now,
+      let account = document.accounts.first(where: { $0.id == id }),
+      usesRateLimitedSource(account, settings: document.settings)
+    else { return nil }
+    return release
   }
   func isRateLimitHeld(_ id: UUID, now: Date = Date()) -> Bool {
-    guard let account = document.accounts.first(where: { $0.id == id }),
-      usesRateLimitedSource(account, settings: document.settings)
-    else { return false }
-    return rateLimitHolds[id].map { $0 > now } ?? false
+    rateLimitRelease(for: id, now: now) != nil
   }
   /// Only the Claude OAuth usage endpoint answers 429; statusline-only reads keep the hold for later.
   private func usesRateLimitedSource(_ account: Account, settings: DeltaveeCore.Settings) -> Bool {
-    !(account.provider == .anthropic && settings.claudeSource == .statuslineOnly)
+    account.provider == .anthropic && settings.claudeSource != .statuslineOnly
   }
   func tick() {
     now = Date()
@@ -110,9 +117,7 @@ final class AppModel {
     let accounts = document.accounts
     let settings = document.settings
     let now = Date()
-    rateLimitHolds = rateLimitHolds.filter { hold in
-      hold.value > now && accounts.contains { $0.id == hold.key }
-    }
+    if let release = claudeRateLimitRelease, release <= now { claudeRateLimitRelease = nil }
     // Held accounts fetch only after their release time, so they are not shown as refreshing.
     refreshingAccountIDs = Set(accounts.map(\.id).filter { !isRateLimitHeld($0, now: now) })
     let previousConfiguration = configurationTask
@@ -126,9 +131,9 @@ final class AppModel {
       await previousConfiguration?.value
       await previous?.stop()
       guard !Task.isCancelled, let self else { return }
-      let holds = rateLimitHolds.filter { hold in
-        accounts.contains { $0.id == hold.key && usesRateLimitedSource($0, settings: settings) }
-      }
+      let holds = Dictionary(
+        uniqueKeysWithValues: accounts.filter { usesRateLimitedSource($0, settings: settings) }
+          .compactMap { account in claudeRateLimitRelease.map { (account.id, $0) } })
       await next.start(accounts: accounts, interval: settings.validInterval, holds: holds) {
         [weak self] account, result in
         await self?.receive(account: account, result: result, generation: current)
@@ -151,9 +156,16 @@ final class AppModel {
   private func receive(
     account: Account, result: Result<CollectedUsage, CollectError>, generation: UUID
   ) {
-    guard let index = document.accounts.firstIndex(where: { $0.id == account.id }) else { return }
-    guard generation == self.generation else {
-      recordLateRateLimit(account: account, result: result, index: index)
+    // Any collection's Claude 429 counts, even one a refresh or a mode switch has replaced: the
+    // server counted that request.
+    let limited = recordClaudeRateLimit(result, from: account)
+    guard generation == self.generation,
+      let index = document.accounts.firstIndex(where: { $0.id == account.id })
+    else {
+      if limited {
+        persist()
+        tick()
+      }
       return
     }
     refreshingAccountIDs.remove(account.id)
@@ -161,14 +173,6 @@ final class AppModel {
     switch result {
     case .success(let value): candidate = value.snapshot
     case .failure(let error): candidate = error.fallback
-    }
-    if usesRateLimitedSource(account, settings: document.settings) {
-      if case .failure(let error) = result, error.kind == .rateLimited, let release = error.retryAt
-      {
-        rateLimitHolds[account.id] = release
-      } else {
-        rateLimitHolds.removeValue(forKey: account.id)
-      }
     }
     switch result {
     case .success(let value): applyEmail(value.email, to: account.id)
@@ -190,25 +194,20 @@ final class AppModel {
     persist()
     tick()
   }
-  /// A rate limit reported by an earlier collection still binds the account's OAuth source, even
-  /// after a refresh or a switch to Statusline Only. The hold applies only while the account still
-  /// reads the same directory; other late results are dropped.
-  private func recordLateRateLimit(
-    account: Account, result: Result<CollectedUsage, CollectError>, index: Int
-  ) {
-    let current = document.accounts[index]
-    guard case .failure(let error) = result, error.kind == .rateLimited,
-      let release = error.retryAt, current.provider == account.provider,
-      current.expandedDirectory == account.expandedDirectory
-    else { return }
-    rateLimitHolds[account.id] = release
-    // The new collection skips this account until the release time, so nothing else would end its
-    // busy state. Statusline Only ignores the hold and ends it with its own read.
-    if usesRateLimitedSource(current, settings: document.settings) {
-      refreshingAccountIDs.remove(account.id)
-    }
-    persist()
-    tick()
+  /// Records a Claude OAuth 429 as the wait for every Claude account. Only the OAuth path reports
+  /// `.rateLimited`, so the result's source decides, not the mode now selected: after a switch to
+  /// Statusline Only the wait is kept for a later return to OAuth.
+  private func recordClaudeRateLimit(
+    _ result: Result<CollectedUsage, CollectError>, from account: Account
+  ) -> Bool {
+    guard account.provider == .anthropic, case .failure(let error) = result,
+      error.kind == .rateLimited, let release = error.retryAt
+    else { return false }
+    claudeRateLimitRelease = max(claudeRateLimitRelease ?? .distantPast, release)
+    // Held accounts wait in the scheduler, so no result would end their busy state. Statusline
+    // Only accounts are not held and end it with their own read.
+    refreshingAccountIDs = refreshingAccountIDs.filter { !isRateLimitHeld($0) }
+    return true
   }
   func save(_ newDocument: AccountDocument) {
     var updated = newDocument
@@ -223,8 +222,7 @@ final class AppModel {
           states.removeValue(forKey: account.id)
           pendingIdentities.removeValue(forKey: account.id)
           detectedEmails.removeValue(forKey: account.id)
-          // A different source has its own limit; the old release time no longer applies.
-          rateLimitHolds.removeValue(forKey: account.id)
+          // The Claude wait is shared, so a new directory does not lift it.
           updated.accounts[index].identityFingerprint = nil
         } else {
           updated.accounts[index].identityFingerprint = previous.identityFingerprint
@@ -235,7 +233,6 @@ final class AppModel {
     states = states.filter { ids.contains($0.key) }
     pendingIdentities = pendingIdentities.filter { ids.contains($0.key) }
     detectedEmails = detectedEmails.filter { ids.contains($0.key) }
-    rateLimitHolds = rateLimitHolds.filter { ids.contains($0.key) }
     // Settings apply live; display-only edits must not restart collection on every change.
     let restartCollection = CollectionInputs(updated) != CollectionInputs(document)
     document = updated
@@ -286,7 +283,7 @@ final class AppModel {
     do {
       if accountStoreWritable { try accountStore.save(document) }
       try snapshotStore.save(states)
-      try rateLimitStore.save(rateLimitHolds)
+      try claudeRateLimitStore.save(claudeRateLimitRelease)
     } catch { notice = "Could not save. Check permissions for the Application Support folder." }
   }
   func setLogin(_ enabled: Bool) {

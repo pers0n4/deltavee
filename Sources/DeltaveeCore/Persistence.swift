@@ -39,7 +39,9 @@ public struct SnapshotStore: Sendable {
     try Persistence.save(compatible, file: directory.appendingPathComponent("snapshots.json"))
   }
 }
-/// Per-account time before which collection must not be retried after a rate limit.
+/// Per-account time before which collection must not be retried after a rate limit. Deltavee now
+/// keeps one wait for every Claude account in `ClaudeRateLimitStore` and only reads this file once,
+/// to carry an earlier wait over.
 public struct RateLimitStore: Sendable {
   public let directory: URL
   public init(directory: URL = Paths.applicationSupport) { self.directory = directory }
@@ -50,6 +52,28 @@ public struct RateLimitStore: Sendable {
   }
   public func save(_ holds: [UUID: Date]) throws {
     try Persistence.save(holds, file: directory.appendingPathComponent("rate-limits.json"))
+  }
+}
+/// The time before which no Claude account may call the OAuth usage endpoint again. One wait covers
+/// every Claude account because the unit Anthropic limits (token, login, or client) is not
+/// documented; public reports conflict, so a 429 for one account is treated as a limit for all.
+public struct ClaudeRateLimitStore: Sendable {
+  public let directory: URL
+  public init(directory: URL = Paths.applicationSupport) { self.directory = directory }
+  private var file: URL { directory.appendingPathComponent("claude-rate-limit.json") }
+  private struct Record: Codable { var releaseAt: Date? }
+  /// The stored wait. Before this file exists, the latest wait of a Claude account in the older
+  /// per-account `rate-limits.json` carries over, so an update does not lift a pending wait.
+  public func load(accounts: [Account]) throws -> Date? {
+    guard FileManager.default.fileExists(atPath: file.path) else {
+      let claude = Set(accounts.filter { $0.provider == .anthropic }.map(\.id))
+      let holds = try RateLimitStore(directory: directory).load()
+      return holds.filter { claude.contains($0.key) }.values.max()
+    }
+    return try JSONDecoder().decode(Record.self, from: Data(contentsOf: file)).releaseAt
+  }
+  public func save(_ releaseAt: Date?) throws {
+    try Persistence.save(Record(releaseAt: releaseAt), file: file)
   }
 }
 private enum Persistence {

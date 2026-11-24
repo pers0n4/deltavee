@@ -27,7 +27,7 @@ Codex uses the [official app-server's usage reporting](https://learn.chatgpt.com
 
 ## Claude OAuth 429 Wait
 
-If Anthropic rate-limits an OAuth usage request, Deltavee waits before trying again, honoring the longer of its backoff and the server's requested wait (the server wait is capped at 24 hours). Refresh, other settings changes, app restarts, and waking the Mac do not bypass this wait. Changing an account's configuration directory clears the wait associated with the previous directory. `Statusline Only` does not use the endpoint; switching to it preserves any pending wait for a later return to OAuth mode.
+If Anthropic rate-limits an OAuth usage request for any Claude account, every Claude account waits before trying again. The wait is the longer of Deltavee's backoff and the server's requested wait (the server wait is capped at 24 hours). One wait covers all Claude accounts because Anthropic does not document whether this limit applies per token, per login, or per client. Refresh, settings changes, a changed configuration directory, removing and adding an account again, app restarts, and waking the Mac do not bypass the wait. A rate limit that arrives while a refresh is restarting collection still counts. `Statusline Only` does not use the endpoint; switching to it preserves any pending wait for a later return to OAuth mode.
 
 See [Account Display](interface.md#account-display) for how waiting accounts appear.
 

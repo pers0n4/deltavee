@@ -6,6 +6,23 @@ private struct FixedCollector: Collector {
   let result: Result<CollectedUsage, CollectError>
   func fetch(_ account: Account) async -> Result<CollectedUsage, CollectError> { result }
 }
+/// Sends each account to its own collector; unlisted accounts succeed. Counts every fetch.
+private actor RoutingCollector: Collector {
+  let routes: [UUID: any Collector]
+  private var counts: [UUID: Int] = [:]
+  init(_ routes: [UUID: any Collector]) { self.routes = routes }
+  func fetch(_ account: Account) async -> Result<CollectedUsage, CollectError> {
+    counts[account.id, default: 0] += 1
+    guard let route = routes[account.id] else {
+      return .success(
+        CollectedUsage(
+          QuotaSnapshot(
+            weeklyUsedPercent: 10, observedAt: Date(), fetchedAt: Date(), source: .claudeOAuth)))
+    }
+    return await route.fetch(account)
+  }
+  func count(_ id: UUID) -> Int { counts[id, default: 0] }
+}
 private actor CountingCollector: Collector {
   var count = 0
   let result: Result<CollectedUsage, CollectError>
@@ -55,6 +72,57 @@ private actor ControlledCollector: Collector {
     let continuation = continuations.removeFirst()
     pending[id] = continuations
     continuation.resume()
+  }
+}
+/// A clock and a pause whose time moves only through `advance(to:)`.
+// `lock` guards `current` and `sleepers`; continuations are resumed after the lock is released.
+private final class ManualTime: UsageClock, @unchecked Sendable {
+  private struct Sleeper {
+    let id: UUID
+    let deadline: Date
+    let continuation: CheckedContinuation<Void, any Error>
+  }
+  private let lock = NSLock()
+  private var current: Date
+  private var sleepers: [Sleeper] = []
+  init(_ start: Date) { current = start }
+  func now() -> Date { lock.withLock { current } }
+  var sleeping: Int { lock.withLock { sleepers.count } }
+  func pause(_ seconds: TimeInterval) async throws {
+    let id = UUID()
+    try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation {
+        (continuation: CheckedContinuation<Void, any Error>) in
+        let due: Bool = lock.withLock {
+          let deadline = current.addingTimeInterval(seconds)
+          if Task.isCancelled || deadline <= current { return true }
+          sleepers.append(Sleeper(id: id, deadline: deadline, continuation: continuation))
+          return false
+        }
+        if due {
+          if Task.isCancelled {
+            continuation.resume(throwing: CancellationError())
+          } else {
+            continuation.resume()
+          }
+        }
+      }
+    } onCancel: {
+      let cancelled: Sleeper? = lock.withLock {
+        guard let index = sleepers.firstIndex(where: { $0.id == id }) else { return nil }
+        return sleepers.remove(at: index)
+      }
+      cancelled?.continuation.resume(throwing: CancellationError())
+    }
+  }
+  func advance(to date: Date) {
+    let due: [Sleeper] = lock.withLock {
+      current = date
+      let due = sleepers.filter { $0.deadline <= date }
+      sleepers.removeAll { $0.deadline <= date }
+      return due
+    }
+    for sleeper in due { sleeper.continuation.resume() }
   }
 }
 /// Holds its first fetch until `open()`, then answers it with a rate limit even if cancelled,
@@ -259,6 +327,68 @@ final class SchedulerTests: CoreTestCase {
     let errors = await recorder.errors
     XCTAssertEqual(fetches, 1)
     XCTAssertEqual(errors.first?.retryAt, retryAt)
+    await scheduler.stop()
+  }
+  func testWaitingAccountRereadsAReleaseExtendedWhileItSlept() async {
+    let first = now.addingTimeInterval(100)
+    let extended = now.addingTimeInterval(5000)
+    let waiting = account(.anthropic)
+    let sibling = Account(name: "Sibling", provider: .anthropic, configDir: "/tmp/fake-sibling")
+    let waitingCollector = CountingCollector(.success(CollectedUsage(snapshot())))
+    let siblingCollector = GatedRateLimitCollector(retryAt: extended)
+    let claude = RoutingCollector([waiting.id: waitingCollector, sibling.id: siblingCollector])
+    let time = ManualTime(now)
+    let recorder = ErrorRecorder()
+    let scheduler = Scheduler(
+      codex: claude, claude: claude, clock: time, pause: { try await time.pause($0) })
+    await scheduler.start(accounts: [waiting, sibling], interval: 600, holds: [waiting.id: first]) {
+      await recorder.record($1)
+    }
+    // The waiting account sleeps until `first`; the sibling's fetch is already in flight.
+    let ready = await eventually { await siblingCollector.waiting && time.sleeping == 1 }
+    XCTAssertTrue(ready)
+    await siblingCollector.open()
+    let limited = await eventually { await recorder.errors.count == 1 }
+    XCTAssertTrue(limited)
+    time.advance(to: first)
+    // Let the woken account act; a re-read sleeps again, a missing re-read fetches now.
+    try? await Task.sleep(for: .milliseconds(50))
+    let resleeps = await eventually { time.sleeping == 2 }
+    XCTAssertTrue(resleeps, "Both accounts sleep until the extended release")
+    var fetches = await waitingCollector.count
+    XCTAssertEqual(fetches, 0, "No request at the first release time")
+    time.advance(to: extended)
+    let resumed = await eventually { await waitingCollector.count == 1 }
+    XCTAssertTrue(resumed, "The request goes out at the extended release time")
+    fetches = await waitingCollector.count
+    XCTAssertEqual(fetches, 1)
+    await scheduler.stop()
+  }
+  func testClaudeRateLimitHoldsEveryClaudeAccountButNotCodex() async {
+    let limited = account(.anthropic)
+    let other = Account(name: "Other", provider: .anthropic, configDir: "/tmp/fake-deltavee-other")
+    let codex = account(.openai)
+    let retryAt = now.addingTimeInterval(5000)
+    let limitedCollector = CountingCollector(.failure(CollectError(.rateLimited, retryAt: retryAt)))
+    let claude = RoutingCollector([limited.id: limitedCollector])
+    let codexCollector = CountingCollector(.success(CollectedUsage(snapshot())))
+    let recorder = ErrorRecorder()
+    let scheduler = Scheduler(codex: codexCollector, claude: claude, clock: FixedClock(date: now))
+    await scheduler.start(accounts: [limited, other, codex], interval: 600) {
+      await recorder.record($1)
+    }
+    let limitedOnce = await eventually { await recorder.errors.count == 1 }
+    XCTAssertTrue(limitedOnce)
+    let codexOnce = await eventually { await codexCollector.count == 1 }
+    XCTAssertTrue(codexOnce)
+    let otherBefore = await claude.count(other.id)
+    await scheduler.refresh(accountID: other.id)
+    await scheduler.refresh(accountID: codex.id)
+    let codexAgain = await eventually { await codexCollector.count == 2 }
+    XCTAssertTrue(codexAgain)
+    try? await Task.sleep(for: .milliseconds(50))
+    let otherAfter = await claude.count(other.id)
+    XCTAssertEqual(otherAfter, otherBefore, "Another Claude account waits for the same release")
     await scheduler.stop()
   }
   func testSchedulerUsesBackoffAsReleaseWithoutRetryAfter() async {

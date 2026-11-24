@@ -7,17 +7,26 @@ public actor Scheduler {
   }
   private var tasks: [UUID: PollingTask] = [:]
   private var accounts: [UUID: Account] = [:]
-  /// Rate-limit release times; no fetch starts for an account before its entry.
+  /// Rate-limit release times; no fetch starts for an account before its entry. A Claude rate limit
+  /// holds every Claude account (see `ClaudeRateLimitStore`), and only time lifts a hold.
   private var holds: [UUID: Date] = [:]
   private var interval: Double = 600
   private var onResult: (@Sendable (Account, Result<CollectedUsage, CollectError>) async -> Void)?
   private let codex: any Collector
   private let claude: any Collector
   private let clock: any UsageClock
-  public init(codex: any Collector, claude: any Collector, clock: any UsageClock = SystemClock()) {
+  /// Waits the given seconds; injected by tests together with `clock`.
+  private let pause: @Sendable (TimeInterval) async throws -> Void
+  public init(
+    codex: any Collector, claude: any Collector, clock: any UsageClock = SystemClock(),
+    pause: @escaping @Sendable (TimeInterval) async throws -> Void = {
+      try await Task.sleep(for: .seconds($0))
+    }
+  ) {
     self.codex = codex
     self.claude = claude
     self.clock = clock
+    self.pause = pause
   }
   public func stop() async {
     accounts.removeAll()
@@ -58,7 +67,13 @@ public actor Scheduler {
     await previous?.value
   }
   private func hold(for id: UUID) -> Date? { holds[id] }
-  private func setHold(_ date: Date?, for id: UUID) { holds[id] = date }
+  private func recordRateLimit(_ release: Date, for account: Account) {
+    let held =
+      account.provider == .anthropic
+      ? Set(accounts.values.filter { $0.provider == .anthropic }.map(\.id)).union([account.id])
+      : [account.id]
+    for id in held { holds[id] = max(holds[id] ?? .distantPast, release) }
+  }
   private func schedule(
     _ account: Account, interval: Double,
     onResult: @escaping @Sendable (Account, Result<CollectedUsage, CollectError>) async -> Void
@@ -76,12 +91,11 @@ public actor Scheduler {
       }
       var failures = 0
       while !Task.isCancelled {
-        // A refresh or restart never fetches before an active rate-limit release time.
-        if let release = hold(for: account.id) {
-          let wait = release.timeIntervalSince(clock.now())
-          if wait > 0 {
-            do { try await Task.sleep(for: .seconds(wait)) } catch { return }
-          }
+        // A refresh or restart never fetches before an active rate-limit release time. Another
+        // Claude account's 429 can move the release later during the wait, so read it again after
+        // every wake.
+        while let release = hold(for: account.id), release > clock.now() {
+          do { try await pause(release.timeIntervalSince(clock.now())) } catch { return }
         }
         var result = await collector.fetch(account)
         // A cancelled fetch's result is dropped, except a rate limit: the server counted that
@@ -97,16 +111,15 @@ public actor Scheduler {
           let release = Self.rateLimitRelease(retryAt: error.retryAt, backoff: delay, now: now)
           error.retryAt = release
           result = .failure(error)
-          setHold(release, for: account.id)
+          recordRateLimit(release, for: account)
           delay = release.timeIntervalSince(now)
-        } else {
-          guard !cancelled else { return }
-          setHold(nil, for: account.id)
+        } else if cancelled {
+          return
         }
         await onResult(account, result)
         if cancelled { return }
         do {
-          try await Task.sleep(for: .seconds(delay))
+          try await pause(delay)
         } catch { return }
       }
     }

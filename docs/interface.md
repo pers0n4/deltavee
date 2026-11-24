@@ -42,7 +42,7 @@ The logos identify account providers. Deltavee is not an official Anthropic or O
 - `Resets` shows the quota reset time; `Updated` shows the original observation time, not the time a file was reread. Tooltips include full dates, the source, and the last successful read time.
 - `Time Ago` shows elapsed observation time in minutes or larger units; observations less than 1 minute old show `just now`. `Countdown` rounds reset time up to minutes. After a reset time passes, `Reset time passed` appears rather than assuming usage is zero.
 - A failed account retains its last successful value and observation time with a failure marker. Without a successful history it shows `--`. Stale values also show `More than 1 hour old`.
-- An account's refresh button refreshes only that account. While waiting after a Claude OAuth rate limit, it is disabled and the account shows `Rate limited · Resumes <time>` (or a countdown). Global `Refresh` skips waiting accounts and is disabled when all accounts are waiting. See [Claude OAuth 429 Wait](collection.md#claude-oauth-429-wait).
+- An account's refresh button refreshes only that account. While Claude accounts wait after a Claude OAuth rate limit, their refresh buttons are disabled and each shows `Rate limited · Resumes <time>` (or a countdown). Global `Refresh` skips waiting accounts and is disabled when all accounts are waiting. See [Claude OAuth 429 Wait](collection.md#claude-oauth-429-wait).
 
 ## Accounts and Settings Screens
 

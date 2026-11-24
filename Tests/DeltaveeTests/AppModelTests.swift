@@ -13,6 +13,28 @@ private actor RecordingCollector: Collector {
   func count(_ id: UUID) -> Int { counts[id, default: 0] }
 }
 
+/// Answers a rate limit for the accounts in `limited` and success for the rest, counting fetches.
+private actor SelectiveRateLimitCollector: Collector {
+  let limited: Set<UUID>
+  let retryAt: Date
+  private var counts: [UUID: Int] = [:]
+  init(limited: Set<UUID>, retryAt: Date) {
+    self.limited = limited
+    self.retryAt = retryAt
+  }
+  func fetch(_ account: Account) async -> Result<CollectedUsage, CollectError> {
+    counts[account.id, default: 0] += 1
+    guard !limited.contains(account.id) else {
+      return .failure(CollectError(.rateLimited, retryAt: retryAt))
+    }
+    return .success(
+      CollectedUsage(
+        QuotaSnapshot(
+          weeklyUsedPercent: 10, observedAt: Date(), fetchedAt: Date(), source: .claudeOAuth)))
+  }
+  func count(_ id: UUID) -> Int { counts[id, default: 0] }
+}
+
 private actor RateLimitedCollector: Collector {
   let retryAt: Date
   init(retryAt: Date) { self.retryAt = retryAt }
@@ -240,16 +262,17 @@ final class AppModelTests: XCTestCase {
     first.refresh()
     try await wait { first.refreshingAccountIDs.isEmpty }
     await limited.stop()
-    XCTAssertEqual(first.rateLimitHolds, [claude.id: release])
+    XCTAssertEqual(first.claudeRateLimitRelease, release)
     XCTAssertTrue(first.isRateLimitHeld(claude.id))
-    XCTAssertEqual(try RateLimitStore(directory: directory).load(), [claude.id: release])
+    XCTAssertEqual(
+      try ClaudeRateLimitStore(directory: directory).load(accounts: [claude, codex]), release)
 
     let collector = RecordingCollector()
     let scheduler = Scheduler(codex: collector, claude: collector)
     let relaunched = AppModel(
       accountStore: AccountStore(directory: directory),
       snapshotStore: SnapshotStore(directory: directory), makeScheduler: { _ in scheduler })
-    XCTAssertEqual(relaunched.rateLimitHolds, [claude.id: release])
+    XCTAssertEqual(relaunched.claudeRateLimitRelease, release)
     relaunched.refresh()
     XCTAssertEqual(
       relaunched.refreshingAccountIDs, [codex.id], "Held accounts are not shown as refreshing")
@@ -270,8 +293,7 @@ final class AppModelTests: XCTestCase {
     try await wait { relaunched.refreshingAccountIDs.isEmpty }
     let statuslineCount = await collector.count(claude.id)
     XCTAssertEqual(statuslineCount, 1)
-    XCTAssertEqual(
-      relaunched.rateLimitHolds, [claude.id: release], "The release time is kept for OAuth")
+    XCTAssertEqual(relaunched.claudeRateLimitRelease, release, "The release time is kept for OAuth")
     await scheduler.stop()
   }
 
@@ -407,6 +429,74 @@ final class AppModelTests: XCTestCase {
   }
 
   @MainActor
+  func testOneClaudeRateLimitHoldsEveryClaudeAccountIncludingNewOnes() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let limited = Account(name: "", provider: .anthropic, configDir: "/fake/claude-a")
+    let other = Account(name: "", provider: .anthropic, configDir: "/fake/claude-b")
+    let codex = Account(name: "", provider: .openai, configDir: "/fake/codex")
+    let release = wholeSecondsFromNow(3600)
+    let collector = SelectiveRateLimitCollector(limited: [limited.id], retryAt: release)
+    var schedulers: [Scheduler] = []
+    let makeScheduler: (DeltaveeCore.Settings) -> Scheduler = { _ in
+      let scheduler = Scheduler(codex: collector, claude: collector)
+      schedulers.append(scheduler)
+      return scheduler
+    }
+    let model = AppModel(
+      accountStore: AccountStore(directory: directory),
+      snapshotStore: SnapshotStore(directory: directory), makeScheduler: makeScheduler)
+    model.save(AccountDocument(accounts: [limited, codex]))
+    try await wait { model.claudeRateLimitRelease == release && model.refreshingAccountIDs.isEmpty }
+    // A Claude account added during the wait waits too, while Codex is unaffected.
+    model.save(AccountDocument(accounts: [limited, other, codex]))
+    XCTAssertTrue(model.isRateLimitHeld(other.id))
+    XCTAssertFalse(model.isRateLimitHeld(codex.id))
+    XCTAssertEqual(model.refreshingAccountIDs, [codex.id])
+    try await wait { model.refreshingAccountIDs.isEmpty }
+    model.refresh(accountID: other.id)
+    XCTAssertTrue(model.refreshingAccountIDs.isEmpty, "Manual refresh is ignored while held")
+    // Removing an account and adding its directory again does not lift the wait.
+    let readded = Account(name: "", provider: .anthropic, configDir: limited.configDir)
+    model.save(AccountDocument(accounts: [readded, other, codex]))
+    XCTAssertTrue(model.isRateLimitHeld(readded.id))
+    try await wait { model.refreshingAccountIDs.isEmpty }
+    try await Task.sleep(for: .milliseconds(100))
+    let counts = await [
+      collector.count(limited.id), collector.count(other.id), collector.count(readded.id),
+      collector.count(codex.id),
+    ]
+    XCTAssertEqual(counts, [1, 0, 0, 3])
+    for scheduler in schedulers { await scheduler.stop() }
+
+    let relaunched = AppModel(
+      accountStore: AccountStore(directory: directory),
+      snapshotStore: SnapshotStore(directory: directory), makeScheduler: makeScheduler)
+    XCTAssertTrue(relaunched.isRateLimitHeld(readded.id))
+  }
+
+  @MainActor
+  func testUpdateCarriesAPerAccountClaudeWaitOver() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let claude = Account(name: "", provider: .anthropic, configDir: "/fake/claude")
+    let added = Account(name: "", provider: .anthropic, configDir: "/fake/claude-new")
+    let codex = Account(name: "", provider: .openai, configDir: "/fake/codex")
+    try AccountStore(directory: directory).save(AccountDocument(accounts: [claude, added, codex]))
+    let release = wholeSecondsFromNow(3600)
+    // The older per-account file; a later Codex entry must not stretch the Claude wait.
+    try RateLimitStore(directory: directory).save([
+      claude.id: release, codex.id: release.addingTimeInterval(600),
+    ])
+    let model = AppModel(
+      accountStore: AccountStore(directory: directory),
+      snapshotStore: SnapshotStore(directory: directory))
+    XCTAssertEqual(model.claudeRateLimitRelease, release)
+    XCTAssertTrue(model.isRateLimitHeld(added.id))
+    XCTAssertFalse(model.isRateLimitHeld(codex.id))
+  }
+
+  @MainActor
   private func wait(_ condition: () -> Bool) async throws {
     for _ in 0..<200 {
       if condition() { return }
@@ -454,12 +544,13 @@ final class AppModelTests: XCTestCase {
       // Give the handovers time to run; a new scheduler that skipped ahead would fetch now.
       try await Task.sleep(for: .milliseconds(100))
       await collector.open()
-      try await wait { model.rateLimitHolds[account.id] == release }
+      try await wait { model.claudeRateLimitRelease == release }
       try await wait { model.refreshingAccountIDs.isEmpty }
       try await Task.sleep(for: .milliseconds(100))
       let fetches = await collector.fetches
       XCTAssertEqual(fetches, 1, "\(refreshes) refresh(es) must not fetch before the release")
-      XCTAssertEqual(try RateLimitStore(directory: directory).load(), [account.id: release])
+      XCTAssertTrue(model.isRateLimitHeld(account.id))
+      XCTAssertEqual(try ClaudeRateLimitStore(directory: directory).load(accounts: []), release)
       for scheduler in schedulers() { await scheduler.stop() }
     }
   }
@@ -475,7 +566,7 @@ final class AppModelTests: XCTestCase {
     document.settings.claudeSource = .statuslineOnly
     model.save(document)
     await collector.open()
-    try await wait { model.rateLimitHolds[account.id] == release }
+    try await wait { model.claudeRateLimitRelease == release }
     // Statusline Only reads right away and ends the busy state with its own result.
     try await waitAsync { await collector.fetches == 2 }
     try await wait { model.refreshingAccountIDs.isEmpty }
@@ -490,18 +581,22 @@ final class AppModelTests: XCTestCase {
   }
 
   @MainActor
-  func testLateRateLimitIsDroppedAfterTheDirectoryChanges() async throws {
+  func testLateRateLimitStillHoldsAfterTheDirectoryChanges() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
-    let collector = GatedRateLimitCollector(retryAt: wholeSecondsFromNow(3600))
+    let release = wholeSecondsFromNow(3600)
+    let collector = GatedRateLimitCollector(retryAt: release)
     let (model, account, schedulers) = try await gatedModel(directory, collector: collector)
     var document = model.document
     document.accounts[0].configDir = "/fake/other-claude"
     model.save(document)
     await collector.open()
-    try await waitAsync { await collector.fetches == 2 }
+    try await wait { model.claudeRateLimitRelease == release }
     try await wait { model.refreshingAccountIDs.isEmpty }
-    XCTAssertNil(model.rateLimitHolds[account.id])
+    try await Task.sleep(for: .milliseconds(100))
+    let fetches = await collector.fetches
+    XCTAssertEqual(fetches, 1, "The Claude wait is shared, so a new directory waits too")
+    XCTAssertTrue(model.isRateLimitHeld(account.id))
     for scheduler in schedulers() { await scheduler.stop() }
   }
 

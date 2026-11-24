@@ -90,8 +90,7 @@ struct PanelView: View {
               timeFormat: model.document.settings.timeFormat,
               canAccept: model.pendingIdentities[account.id] != nil,
               refreshing: model.refreshingAccountIDs.contains(account.id),
-              heldUntil: model.isRateLimitHeld(account.id, now: model.now)
-                ? model.rateLimitHolds[account.id] : nil,
+              heldUntil: model.rateLimitRelease(for: account.id, now: model.now),
               accept: { model.acceptIdentity(account.id) },
               refresh: { model.refresh(accountID: account.id) }
             ).padding(AccountMetaLine.rowInset)
