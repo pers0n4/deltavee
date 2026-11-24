@@ -34,7 +34,7 @@ It tracks several Claude and Codex accounts side by side, including more than on
 
 - Shows each account's weekly quota next to its provider logo in the menu bar, as the remaining share by default or as the used share. A trailing `!` marks a failed last fetch. Values more than an hour old are dimmed, or shown with a hollow dot when `Color menu bar usage` is enabled.
 - The panel shows a weekly quota bar, colored by how much of the quota is used, and the reset time.
-- Accounts can be labeled, reordered by dragging, and hidden from the menu bar.
+- Accounts can be labeled, reordered by dragging, and hidden from the menu bar. An unlabeled account shows its sign-in email.
 - Fetches usage for all accounts on a schedule or for one account on demand. After a Claude OAuth rate limit, it waits before trying again.
 - Stores no tokens. Claude's `Statusline Only` mode disables Keychain and network access for Claude usage collection.
 - Launches at login if enabled.

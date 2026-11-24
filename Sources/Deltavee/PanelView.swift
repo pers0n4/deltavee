@@ -82,7 +82,8 @@ struct PanelView: View {
           }
           ForEach(accounts) { account in
             AccountRow(
-              account: account, state: model.states[account.id] ?? .neverFetched,
+              account: account, email: model.detectedEmails[account.id],
+              state: model.states[account.id] ?? .neverFetched,
               mode: model.document.settings.mode, now: model.now,
               resetTimeMode: model.document.settings.resetTimeMode,
               updatedTimeMode: model.document.settings.updatedTimeMode,
@@ -330,6 +331,8 @@ struct RateLimitNote: View {
 
 private struct AccountRow: View {
   let account: Account
+  /// Detected email, shown when the account has no label.
+  let email: String?
   let state: AccountState
   let mode: PercentMode
   let now: Date
@@ -353,11 +356,15 @@ private struct AccountRow: View {
           if let label = account.displayLabel {
             Text(label).font(.caption).foregroundStyle(.secondary).lineLimit(1)
               .truncationMode(.tail)
+          } else if let email {
+            // An email is told apart by both ends, the person and the domain, so cut its middle.
+            Text(email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+              .truncationMode(.middle)
           }
         }
         .accessibilityElement(children: .ignore)
-        .help(QuotaPresentation.accountAccessibilityLabel(account))
-        .accessibilityLabel(QuotaPresentation.accountAccessibilityLabel(account))
+        .help(QuotaPresentation.accountAccessibilityLabel(account, email: email))
+        .accessibilityLabel(QuotaPresentation.accountAccessibilityLabel(account, email: email))
         Spacer(minLength: 4)
         Button(action: refresh) {
           Group {
@@ -374,7 +381,8 @@ private struct AccountRow: View {
                 $0, mode: .absolute, now: now, timeFormat: timeFormat)
             } ?? "Refresh this account"
           )
-          .accessibilityLabel("Refresh \(QuotaPresentation.accountAccessibilityLabel(account))")
+          .accessibilityLabel(
+            "Refresh \(QuotaPresentation.accountAccessibilityLabel(account, email: email))")
       }
       HStack(alignment: .firstTextBaseline) {
         Text("Weekly quota").foregroundStyle(.secondary)

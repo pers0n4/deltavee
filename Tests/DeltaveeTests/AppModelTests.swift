@@ -21,6 +21,26 @@ private actor RateLimitedCollector: Collector {
   }
 }
 
+/// Returns the queued email observations in order, one per fetch; quota alternates success and failure.
+private actor EmailCollector: Collector {
+  private var emails: [EmailObservation]
+  private var fetches = 0
+  init(_ emails: [EmailObservation]) { self.emails = emails }
+  func fetch(_ account: Account) async -> Result<CollectedUsage, CollectError> {
+    fetches += 1
+    let email = emails.isEmpty ? .unknown : emails.removeFirst()
+    guard fetches.isMultiple(of: 2) else {
+      return .success(
+        CollectedUsage(
+          QuotaSnapshot(
+            weeklyUsedPercent: 10, observedAt: Date(), fetchedAt: Date(), source: .codexAppServer),
+          email: email))
+    }
+    return .failure(CollectError(.authRequired, email: email))
+  }
+  var count: Int { fetches }
+}
+
 /// A clock whose time moves only through `advance(by:)`; sleepers resume once it reaches their deadline.
 // `lock` guards `current` and `sleepers`; continuations are resumed after the lock is released.
 private final class ManualClock: Clock, @unchecked Sendable {
@@ -304,6 +324,56 @@ final class AppModelTests: XCTestCase {
       model.save(changed)
       XCTAssertEqual(made, before + 1)
     }
+    try await wait { model.refreshingAccountIDs.isEmpty }
+    await scheduler.stop()
+  }
+
+  @MainActor
+  func testDetectedEmailFollowsEachDefinitiveReadAndStaysOffDisk() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let account = Account(name: "", provider: .openai, configDir: "/fake/codex")
+    let collector = EmailCollector([
+      .address("first@example.com"), .unknown, .address("second@example.com"), .absent,
+      .address("third@example.com"),
+    ])
+    let scheduler = Scheduler(codex: collector, claude: collector)
+    let model = AppModel(
+      accountStore: AccountStore(directory: directory),
+      snapshotStore: SnapshotStore(directory: directory), makeScheduler: { _ in scheduler })
+    model.save(AccountDocument(accounts: [account]))
+    var fetched = 1
+    func fetch(expect email: String?, _ message: String) async throws {
+      if fetched > 1 { model.refresh(accountID: account.id) }
+      let target = fetched
+      try await waitAsync { await collector.count == target }
+      try await wait { model.refreshingAccountIDs.isEmpty }
+      XCTAssertEqual(model.detectedEmails[account.id], email, message)
+      fetched += 1
+    }
+    try await fetch(expect: "first@example.com", "Success reports the email")
+    try await fetch(expect: "first@example.com", "An unreadable source keeps the previous email")
+    // No fingerprint is involved: the email changes on the read alone, during a quota failure.
+    try await fetch(expect: "second@example.com", "A new email replaces the previous one")
+    try await fetch(expect: nil, "A definitive answer without an email clears it")
+    try await fetch(expect: "third@example.com", "Third email")
+    XCTAssertEqual(
+      IconRenderer.parts(
+        accounts: model.document.accounts, states: model.states, mode: .used, now: Date(),
+        emails: model.detectedEmails
+      ).first?.accountName, "third@example.com")
+    for file in try FileManager.default.contentsOfDirectory(
+      at: directory, includingPropertiesForKeys: nil)
+    {
+      XCTAssertFalse(
+        try String(contentsOf: file, encoding: .utf8).contains("@example.com"),
+        "\(file.lastPathComponent) must not contain the email")
+    }
+    var moved = model.document
+    moved.accounts[0].configDir = "/fake/other"
+    model.save(moved)
+    XCTAssertNil(model.detectedEmails[account.id], "A different directory is a different login")
+    try await waitAsync { await collector.count == fetched }
     try await wait { model.refreshingAccountIDs.isEmpty }
     await scheduler.stop()
   }

@@ -330,7 +330,7 @@ struct SettingsView: View {
 
   private func accountCard(_ account: Binding<Account>) -> some View {
     let value = account.wrappedValue
-    let accessibilityLabel = QuotaPresentation.accountAccessibilityLabel(value)
+    let accessibilityLabel = accountLabel(value)
     let lifted = cardDrag?.id == value.id
     return GroupBox {
       VStack(alignment: .leading, spacing: 10) {
@@ -374,7 +374,7 @@ struct SettingsView: View {
     HStack(spacing: 8) {
       Image(systemName: "line.3.horizontal").foregroundStyle(.secondary)
         .frame(width: 24, height: 32).contentShape(Rectangle())
-        .accessibilityLabel("Drag to reorder \(QuotaPresentation.accountAccessibilityLabel(value))")
+        .accessibilityLabel("Drag to reorder \(accountLabel(value))")
         .help("Drag above or below another account to change order")
         .gesture(
           DragGesture(minimumDistance: 3, coordinateSpace: .named(Self.accountListSpace))
@@ -385,16 +385,18 @@ struct SettingsView: View {
         .resizable().scaledToFit().frame(width: 16, height: 16).accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 3) {
         Text(value.provider.displayName).font(.headline)
-        Text(value.displayLabel ?? URL(fileURLWithPath: value.expandedDirectory).lastPathComponent)
-          .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+        Text(
+          value.displayLabel(email: model.detectedEmails[value.id])
+            ?? URL(fileURLWithPath: value.expandedDirectory).lastPathComponent
+        )
+        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
       }.help(value.expandedDirectory)
       Spacer(minLength: 0)
       // Menu bar visibility is a per-account display switch, adjustable without expanding.
       Toggle("Show in menu bar", isOn: showInIcon(value.id))
         .toggleStyle(.switch).controlSize(.mini).labelsHidden().fixedSize()
         .help(value.showInIcon ? "Shown in the menu bar" : "Hidden from the menu bar")
-        .accessibilityLabel(
-          "Show \(QuotaPresentation.accountAccessibilityLabel(value)) in menu bar")
+        .accessibilityLabel("Show \(accountLabel(value)) in menu bar")
       Button {
         if !expandedAccounts.insert(value.id).inserted { expandedAccounts.remove(value.id) }
       } label: {
@@ -402,9 +404,13 @@ struct SettingsView: View {
           .frame(width: 24, height: 28).contentShape(Rectangle())
       }.buttonStyle(.borderless)
         .accessibilityLabel(
-          "\(expandedAccounts.contains(value.id) ? "Collapse" : "Expand") \(QuotaPresentation.accountAccessibilityLabel(value)) details"
+          "\(expandedAccounts.contains(value.id) ? "Collapse" : "Expand") \(accountLabel(value)) details"
         )
     }
+  }
+
+  private func accountLabel(_ value: Account) -> String {
+    QuotaPresentation.accountAccessibilityLabel(value, email: model.detectedEmails[value.id])
   }
 
   private func showInIcon(_ id: UUID) -> Binding<Bool> {
@@ -427,12 +433,15 @@ struct SettingsView: View {
 
   private func accountDetails(_ account: Binding<Account>) -> some View {
     let value = account.wrappedValue
-    let label = QuotaPresentation.accountAccessibilityLabel(value)
+    let label = accountLabel(value)
     return VStack(alignment: .leading, spacing: 10) {
       VStack(alignment: .leading, spacing: 5) {
         Text("Label (optional)").font(.caption).foregroundStyle(.secondary)
         CommitTextField(
-          "Shown under the provider, e.g. Work", value: accountField(value.id, \.name, missing: ""),
+          // The card header already shows the detected email; a cut-off copy here would add nothing.
+          model.detectedEmails[value.id] == nil
+            ? "Shown under the provider, e.g. Work" : "Blank uses the sign-in email",
+          value: accountField(value.id, \.name, missing: ""),
           onCommit: apply
         )
         .textFieldStyle(.roundedBorder).accessibilityLabel("Optional label for \(label)")

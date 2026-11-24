@@ -6,7 +6,7 @@ How Deltavee reads usage, handles failures, and uses local credentials. See the 
 
 | Provider | Usage source | Credential boundary |
 | --- | --- | --- |
-| Codex | The official Codex CLI's app-server usage reporting | Deltavee does not read or write `auth.json`. The launched CLI may refresh its own credentials. |
+| Codex | The official Codex CLI's app-server usage and account reporting | Deltavee does not read or write `auth.json`. The launched CLI may refresh its own credentials. |
 | Claude | An unofficial Anthropic OAuth usage endpoint, with local statusline observations as a fallback | Outside Statusline Only mode, Deltavee reads the CLI's credentials from macOS Keychain, falling back to the account directory's `.credentials.json`. It does not use refresh tokens or write credentials back; it may launch the official CLI to refresh an expired token, as described below. |
 
 ## Provider Terms and Account Risk
@@ -99,6 +99,8 @@ Set each account's config directory in Deltavee's account settings; these contro
 Deltavee stores account settings, usage snapshots, rate-limit waits, statusline observations, and token-refresh logs in `~/Library/Application Support/dev.pers0n4.deltavee/`. It does not store tokens there.
 
 The local token-refresh log records attempts and outcomes and **can contain account IDs and config-directory paths**. It does not log tokens, prompts, or CLI output. The statusline capture helper saves only weekly usage percentages, reset times, and observation time—not the full statusline input or conversation contents—and does not call provider APIs.
+
+An account without a label shows the sign-in email that its CLI reports: Codex through the app-server's account reporting, and Claude from the `.claude.json` file that Claude Code keeps for the login. Deltavee keeps this email in memory only and does not write it to disk, so after a relaunch it appears again once the first fetch finishes. A signed-out account, an API-key login, and Claude's Statusline Only mode show no email. The email appears in the panel, the Accounts screen, and the menu bar tooltip, so it is visible in screenshots and screen sharing; set a label to show something else.
 
 ## Claude Statusline Observations
 

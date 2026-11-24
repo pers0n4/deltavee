@@ -79,7 +79,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
     panelController.apply(theme: model.document.settings.theme)
     let parts = IconRenderer.parts(
       accounts: model.document.accounts, states: model.states, mode: model.document.settings.mode,
-      now: model.now)
+      now: model.now, emails: model.detectedEmails)
     item.button?.attributedTitle = MenuBarTitle.attributedString(
       parts: parts, colorUsage: model.document.settings.colorMenuBarUsage)
     let description = MenuBarTitle.accessibilityDescription(

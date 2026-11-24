@@ -26,6 +26,7 @@ public struct Account: Codable, Sendable, Identifiable, Equatable {
     self.order = order
     self.identityFingerprint = identityFingerprint
   }
+  /// The user's label; nil when blank or the provider name.
   public var displayLabel: String? {
     let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !label.isEmpty, label.caseInsensitiveCompare(provider.displayName) != .orderedSame else {
@@ -33,6 +34,8 @@ public struct Account: Codable, Sendable, Identifiable, Equatable {
     }
     return label
   }
+  /// The user's label, else the email the account's CLI reports.
+  public func displayLabel(email: String?) -> String? { displayLabel ?? email }
   public var expandedDirectory: String { Paths.absolute(configDir) }
   /// The CLI command that signs this account in, shown under a sign-in-required state.
   /// For Claude the same command also refreshes an expired access token.
@@ -146,15 +149,41 @@ public struct CollectError: Error, Codable, Equatable, Sendable {
   public var fallback: QuotaSnapshot?
   /// Earliest time the source may be asked again; set for rate-limited failures.
   public var retryAt: Date?
-  public init(_ kind: FailureKind, fallback: QuotaSnapshot? = nil, retryAt: Date? = nil) {
+  /// Excluded from coding so the observed email is never written out; decodes as `.unknown`.
+  public var email: EmailObservation = .unknown
+  private enum CodingKeys: String, CodingKey { case kind, fallback, retryAt }
+  public init(
+    _ kind: FailureKind, fallback: QuotaSnapshot? = nil, retryAt: Date? = nil,
+    email: EmailObservation = .unknown
+  ) {
     self.kind = kind
     self.fallback = fallback
     self.retryAt = retryAt
+    self.email = email
+  }
+}
+/// The sign-in email an account's CLI reported during one collection, read independently of quota.
+public enum EmailObservation: Equatable, Sendable {
+  /// The source could not be read or answered in an unexpected form; keep the previous email.
+  case unknown
+  /// The source answered definitively without an email (signed out, API-key login); clear it.
+  case absent
+  case address(String)
+  /// Trims the value and treats a blank string as no email.
+  static func reported(_ value: Any?) -> EmailObservation? {
+    guard let text = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !text.isEmpty
+    else { return nil }
+    return .address(text)
   }
 }
 public struct CollectedUsage: Sendable {
   public var snapshot: QuotaSnapshot
-  public init(_ snapshot: QuotaSnapshot) { self.snapshot = snapshot }
+  public var email: EmailObservation
+  public init(_ snapshot: QuotaSnapshot, email: EmailObservation = .unknown) {
+    self.snapshot = snapshot
+    self.email = email
+  }
 }
 public protocol Collector: Sendable {
   func fetch(_ account: Account) async -> Result<CollectedUsage, CollectError>
@@ -284,8 +313,10 @@ public enum IconRenderer {
     guard let used else { return "--" }
     return String(format: "%.0f%%", mode == .used ? used : 100 - used)
   }
+  /// `emails` holds each account's detected email, shown when the account has no label.
   public static func parts(
-    accounts: [Account], states: [UUID: AccountState], mode: PercentMode, now: Date
+    accounts: [Account], states: [UUID: AccountState], mode: PercentMode, now: Date,
+    emails: [UUID: String] = [:]
   ) -> [IconPart] {
     accounts.filter(\.showInIcon).sorted { $0.order < $1.order }.map { account in
       let state = states[account.id] ?? .neverFetched
@@ -295,7 +326,8 @@ public enum IconRenderer {
       let marker = state.hasFailure ? "!" : ""
       return IconPart(
         provider: account.provider,
-        accountName: account.displayLabel ?? account.provider.displayName,
+        accountName: account.displayLabel(email: emails[account.id])
+          ?? account.provider.displayName,
         usageText: "\(percentage(state.lastSuccess?.weeklyUsedPercent, mode: mode))\(marker)",
         stale: stale, weeklyUsedPercent: state.lastSuccess?.weeklyUsedPercent)
     }

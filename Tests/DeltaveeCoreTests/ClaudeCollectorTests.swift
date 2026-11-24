@@ -16,6 +16,10 @@ private struct FakeIdentity: ClaudeIdentityReading {
   func fingerprint(configDir: String, variable: ClaudeConfigDirVariable?) -> String? {
     Paths.fingerprint("fake-test-identity")
   }
+  func read(configDir: String, variable: ClaudeConfigDirVariable?) -> ClaudeIdentity {
+    ClaudeIdentity(
+      fingerprint: Paths.fingerprint("fake-test-identity"), email: .address("fake@example.com"))
+  }
 }
 private func expiredCredential(_ token: String, _ variable: ClaudeConfigDirVariable = .set)
   -> OAuthCredential
@@ -198,22 +202,51 @@ final class ClaudeCollectorTests: CoreTestCase {
       .set: root.appendingPathComponent("dir.claude.json"),
     ]
     for (variable, file) in files {
-      try Data(#"{"oauthAccount":{"accountUuid":"fake-\#(variable)"}}"#.utf8).write(to: file)
+      try Data(
+        #"{"oauthAccount":{"accountUuid":"fake-\#(variable)","emailAddress":"\#(variable)@example.com"}}"#
+          .utf8
+      ).write(to: file)
     }
     try FileManager.default.setAttributes(
       [.modificationDate: Date(timeIntervalSince1970: 1_000)], ofItemAtPath: files[.set]!.path)
     let reader = ClaudeIdentityReader { _, variable in files[variable]! }
     XCTAssertEqual(
-      reader.fingerprint(configDir: "~/.claude", variable: .set), Paths.fingerprint("fake-set"))
+      reader.read(configDir: "~/.claude", variable: .set),
+      ClaudeIdentity(fingerprint: Paths.fingerprint("fake-set"), email: .address("set@example.com"))
+    )
     XCTAssertEqual(
-      reader.fingerprint(configDir: "~/.claude", variable: .unset),
+      reader.read(configDir: "~/.claude", variable: .unset).fingerprint,
       Paths.fingerprint("fake-unset"))
     XCTAssertEqual(
-      reader.fingerprint(configDir: "~/.claude", variable: nil), Paths.fingerprint("fake-unset"),
-      "Without a credential the newer file wins")
+      reader.read(configDir: "~/.claude", variable: nil).fingerprint,
+      Paths.fingerprint("fake-unset"), "Without a credential the newer file wins")
     XCTAssertEqual(
-      reader.fingerprint(configDir: "/tmp/fake-deltavee-config", variable: nil),
+      reader.read(configDir: "/tmp/fake-deltavee-config", variable: nil).fingerprint,
       Paths.fingerprint("fake-set"), "Other directories only have the variable's file")
+  }
+  func testIdentityEmailDistinguishesNoEmailFromUnreadableFile() throws {
+    let file = try temporaryDirectory().appendingPathComponent("fake.claude.json")
+    let reader = ClaudeIdentityReader { _, _ in file }
+    XCTAssertEqual(reader.read(configDir: "/fake", variable: .set), .unreadable, "Missing file")
+    for (json, expected) in [
+      (
+        #"{"oauthAccount":{"accountUuid":"fake","emailAddress":"fake@example.com"}}"#,
+        EmailObservation.address("fake@example.com")
+      ),
+      (#"{"oauthAccount":{"accountUuid":"fake"}}"#, .absent),
+      (#"{"numStartups":1}"#, .absent),
+      ("not json", .unknown),
+    ] {
+      try Data(json.utf8).write(to: file)
+      XCTAssertEqual(reader.read(configDir: "/fake", variable: .set).email, expected, json)
+    }
+  }
+  func testFailedFetchStillReportsIdentityEmail() async {
+    let result = await collector(credentials: FakeCredentials(expiry: now), http: FakeHTTP())
+      .fetch(account())
+    guard case .failure(let error) = result else { return XCTFail("Expected tokenExpired") }
+    XCTAssertEqual(error.kind, .tokenExpired)
+    XCTAssertEqual(error.email, .address("fake@example.com"))
   }
   func testExpiredTokenIsDistinctFromAuthFailureAndSkipsNetwork() async {
     let credentials = FakeCredentials(expiry: now)

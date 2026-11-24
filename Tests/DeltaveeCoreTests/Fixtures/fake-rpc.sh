@@ -16,6 +16,14 @@ case "$CODEX_HOME" in
   */deadline) : ;;
   *) printf '%s\n' '{"id":2,"result":{"rateLimits":{"secondary":{"windowDurationMins":10080,"usedPercent":31}}}}' ;;
 esac
+case "$CODEX_HOME" in
+  */noaccount) exit 0 ;;
+  */deadline) : ;;
+  *)
+    read -r account
+    printf '%s\n' '{"id":3,"result":{"account":{"type":"chatgpt","email":"fake@example.com"}}}'
+    ;;
+esac
 while read -r remaining; do :; done
 printf eof > "$CODEX_HOME/eof"
 case "$CODEX_HOME" in

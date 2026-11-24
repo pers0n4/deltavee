@@ -68,9 +68,11 @@ final class ProcessesTests: CoreTestCase {
   }
   func testRPCClosesStdinAndAllowsNaturalExit() async throws {
     let (directory, executable) = try rpcFixture(mode: "natural")
-    let data = try await LiveCodexRPCTransport().rateLimits(
+    let replies = try await LiveCodexRPCTransport().read(
       executable: executable.path, configDir: directory.path)
-    XCTAssertEqual(try CodexAppServerCollector.parse(data, now: now).weeklyUsedPercent, 31)
+    XCTAssertEqual(
+      try CodexAppServerCollector.parse(replies.rateLimits, now: now).weeklyUsedPercent, 31)
+    XCTAssertEqual(CodexAppServerCollector.email(replies.account), .address("fake@example.com"))
     XCTAssertTrue(
       FileManager.default.fileExists(atPath: directory.appendingPathComponent("eof").path))
     XCTAssertFalse(
@@ -91,9 +93,18 @@ final class ProcessesTests: CoreTestCase {
     let (directory, _) = try rpcFixture(mode: "natural")
     let executable = try symlinkedLauncher(
       "codex", in: directory, body: #"exec "$CODEX_HOME/fake-rpc" "$@""#)
-    let data = try await LiveCodexRPCTransport().rateLimits(
+    let replies = try await LiveCodexRPCTransport().read(
       executable: executable.path, configDir: directory.path)
-    XCTAssertEqual(try CodexAppServerCollector.parse(data, now: now).weeklyUsedPercent, 31)
+    XCTAssertEqual(
+      try CodexAppServerCollector.parse(replies.rateLimits, now: now).weeklyUsedPercent, 31)
+  }
+  func testRPCKeepsQuotaWhenAccountReadGetsNoReply() async throws {
+    let (directory, executable) = try rpcFixture(mode: "noaccount")
+    let replies = try await LiveCodexRPCTransport().read(
+      executable: executable.path, configDir: directory.path)
+    XCTAssertEqual(
+      try CodexAppServerCollector.parse(replies.rateLimits, now: now).weeklyUsedPercent, 31)
+    XCTAssertNil(replies.account)
   }
 
   private func symlinkedLauncher(_ name: String, in directory: URL, body: String) throws -> URL {
@@ -121,7 +132,7 @@ final class ProcessesTests: CoreTestCase {
       [.posixPermissions: 0o700], ofItemAtPath: executable.path)
 
     do {
-      _ = try await LiveCodexRPCTransport().rateLimits(
+      _ = try await LiveCodexRPCTransport().read(
         executable: executable.path, configDir: directory.path)
       XCTFail("Expected the Codex launcher to fail without Node.js")
     } catch {
@@ -144,7 +155,7 @@ final class ProcessesTests: CoreTestCase {
       [.posixPermissions: 0o700], ofItemAtPath: executable.path)
 
     do {
-      _ = try await LiveCodexRPCTransport().rateLimits(
+      _ = try await LiveCodexRPCTransport().read(
         executable: executable.path, configDir: directory.path)
       XCTFail("Expected the Codex launcher to fail")
     } catch let error as CollectError {
@@ -154,7 +165,7 @@ final class ProcessesTests: CoreTestCase {
   func testRPCGraceThenTERMAllowsCleanup() async throws {
     let (directory, executable) = try rpcFixture(mode: "term")
     let start = ProcessInfo.processInfo.systemUptime
-    _ = try await LiveCodexRPCTransport().rateLimits(
+    _ = try await LiveCodexRPCTransport().read(
       executable: executable.path, configDir: directory.path)
     XCTAssertGreaterThanOrEqual(ProcessInfo.processInfo.systemUptime - start, 3)
     XCTAssertTrue(
@@ -163,7 +174,7 @@ final class ProcessesTests: CoreTestCase {
   func testRPCIgnoresTERMAndIsKilledAfterGrace() async throws {
     let (directory, executable) = try rpcFixture(mode: "kill")
     let start = ProcessInfo.processInfo.systemUptime
-    _ = try await LiveCodexRPCTransport().rateLimits(
+    _ = try await LiveCodexRPCTransport().read(
       executable: executable.path, configDir: directory.path)
     let elapsed = ProcessInfo.processInfo.systemUptime - start
     XCTAssertGreaterThanOrEqual(elapsed, 4)
@@ -187,7 +198,7 @@ final class ProcessesTests: CoreTestCase {
     let (directory, executable) = try rpcFixture(mode: "deadline")
     let start = ProcessInfo.processInfo.systemUptime
     do {
-      _ = try await LiveCodexRPCTransport().rateLimits(
+      _ = try await LiveCodexRPCTransport().read(
         executable: executable.path, configDir: directory.path)
       XCTFail("Expected timeout")
     } catch { XCTAssertEqual((error as? CollectError)?.kind, .timeout) }

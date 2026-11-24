@@ -333,11 +333,12 @@ final class QuotaPresentationTests: XCTestCase {
     ] {
       XCTAssertEqual(
         QuotaPresentation.accountAccessibilityLabel(
-          Account(name: name, provider: provider, configDir: "/fake")), provider.displayName)
+          Account(name: name, provider: provider, configDir: "/fake"), email: nil),
+        provider.displayName)
     }
     XCTAssertEqual(
       QuotaPresentation.accountAccessibilityLabel(
-        Account(name: "Work", provider: .openai, configDir: "/fake")), "Work, Codex")
+        Account(name: "Work", provider: .openai, configDir: "/fake"), email: nil), "Work, Codex")
   }
 
   func testCompactResetPreservesCountdownAndFullTooltipDetail() {
@@ -360,7 +361,17 @@ final class QuotaPresentationTests: XCTestCase {
       for name in ["", " \n\t", provider.displayName, provider.displayName.lowercased()] {
         let account = Account(name: name, provider: provider, configDir: "/fake")
         XCTAssertNil(account.displayLabel)
-        XCTAssertEqual(QuotaPresentation.accountAccessibilityLabel(account), provider.displayName)
+        XCTAssertEqual(
+          QuotaPresentation.accountAccessibilityLabel(account, email: nil), provider.displayName)
+        // Without a label the detected email stands in everywhere the label would appear.
+        let email = "fake@example.com"
+        XCTAssertEqual(
+          QuotaPresentation.accountAccessibilityLabel(account, email: email),
+          "\(email), \(provider.displayName)")
+        XCTAssertEqual(
+          IconRenderer.parts(
+            accounts: [account], states: [:], mode: .used, now: now, emails: [account.id: email]
+          ).first?.accountName, email)
         XCTAssertEqual(
           IconRenderer.parts(accounts: [account], states: [:], mode: .used, now: now).first?
             .accountName, provider.displayName)
@@ -368,11 +379,14 @@ final class QuotaPresentationTests: XCTestCase {
       let account = Account(name: "  Work 계정  ", provider: provider, configDir: "/fake")
       XCTAssertEqual(account.displayLabel, "Work 계정")
       XCTAssertEqual(
-        QuotaPresentation.accountAccessibilityLabel(account), "Work 계정, \(provider.displayName)")
+        QuotaPresentation.accountAccessibilityLabel(account, email: "fake@example.com"),
+        "Work 계정, \(provider.displayName)", "The user's label wins over the email")
       XCTAssertEqual(account.name, "  Work 계정  ")
       XCTAssertEqual(
-        IconRenderer.parts(accounts: [account], states: [:], mode: .used, now: now).first?
-          .accountName, "Work 계정")
+        IconRenderer.parts(
+          accounts: [account], states: [:], mode: .used, now: now,
+          emails: [account.id: "fake@example.com"]
+        ).first?.accountName, "Work 계정")
     }
   }
 

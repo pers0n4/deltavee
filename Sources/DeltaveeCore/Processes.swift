@@ -25,8 +25,26 @@ extension CommandRunning {
       currentDirectory: nil, timeout: timeout)
   }
 }
+/// Raw JSON-RPC replies from one app-server session.
+public struct CodexAppServerReplies: Sendable {
+  public var rateLimits: Data
+  /// Nil when `account/read` got no reply; the email is then unknown.
+  public var account: Data?
+  public init(rateLimits: Data, account: Data?) {
+    self.rateLimits = rateLimits
+    self.account = account
+  }
+}
 public protocol CodexRPCTransport: Sendable {
   func rateLimits(executable: String, configDir: String) async throws -> Data
+  /// Both replies of one session. The default asks only for rate limits, leaving the email unknown.
+  func read(executable: String, configDir: String) async throws -> CodexAppServerReplies
+}
+extension CodexRPCTransport {
+  public func read(executable: String, configDir: String) async throws -> CodexAppServerReplies {
+    CodexAppServerReplies(
+      rateLimits: try await rateLimits(executable: executable, configDir: configDir), account: nil)
+  }
 }
 
 // This owner serializes termination from the deadline/cancellation handler with process startup.
@@ -234,6 +252,9 @@ public struct LiveCommandRunner: CommandRunning {
 public struct LiveCodexRPCTransport: CodexRPCTransport {
   public init() {}
   public func rateLimits(executable: String, configDir: String) async throws -> Data {
+    try await read(executable: executable, configDir: configDir).rateLimits
+  }
+  public func read(executable: String, configDir: String) async throws -> CodexAppServerReplies {
     let owner = ProcessOwner()
     return try await withTaskCancellationHandler {
       try await ProcessIO.blocking {
@@ -310,11 +331,19 @@ public struct LiveCodexRPCTransport: CodexRPCTransport {
         }
         try send(["method": "initialized"])
         try send(["id": 2, "method": "account/rateLimits/read"])
-        let data = try response(id: 2)
+        let rateLimits = try response(id: 2)
+        // Asked after the quota so a missing or failing `account/read` cannot cost the quota reply,
+        // including when the deadline stops the process while waiting for it. An error reply is
+        // returned as is; only a missing reply leaves the email unknown.
+        var account: Data?
+        if (try? send(["id": 3, "method": "account/read", "params": ["refreshToken": false]]))
+          != nil
+        {
+          account = try? response(id: 3)
+        }
         try? input.fileHandleForWriting.close()
         owner.shutdown(grace: 3)
-        if owner.timedOut { throw CollectError(.timeout) }
-        return data
+        return CodexAppServerReplies(rateLimits: rateLimits, account: account)
       }
     } onCancel: {
       owner.stop()

@@ -9,6 +9,10 @@ final class AppModel {
   var document = AccountDocument()
   var states: [UUID: AccountState] = [:]
   var pendingIdentities: [UUID: String] = [:]
+  /// Emails each account's CLI reported, shown when the account has no label. Kept only in memory:
+  /// never written to `accounts.json` or `snapshots.json`, so it is empty again after a relaunch
+  /// until the first collection.
+  private(set) var detectedEmails: [UUID: String] = [:]
   var refreshingAccountIDs: Set<UUID> = []
   var notice: String?
   var now = Date()
@@ -160,6 +164,10 @@ final class AppModel {
         rateLimitHolds.removeValue(forKey: account.id)
       }
     }
+    switch result {
+    case .success(let value): applyEmail(value.email, to: account.id)
+    case .failure(let error): applyEmail(error.email, to: account.id)
+    }
     let previous = states[account.id] ?? .neverFetched
     let updated = StateReducer.applying(result, to: previous, account: &document.accounts[index])
     if case .identityChanged = updated {
@@ -188,6 +196,7 @@ final class AppModel {
         {
           states.removeValue(forKey: account.id)
           pendingIdentities.removeValue(forKey: account.id)
+          detectedEmails.removeValue(forKey: account.id)
           // A different source has its own limit; the old release time no longer applies.
           rateLimitHolds.removeValue(forKey: account.id)
           updated.accounts[index].identityFingerprint = nil
@@ -199,6 +208,7 @@ final class AppModel {
     let ids = Set(updated.accounts.map(\.id))
     states = states.filter { ids.contains($0.key) }
     pendingIdentities = pendingIdentities.filter { ids.contains($0.key) }
+    detectedEmails = detectedEmails.filter { ids.contains($0.key) }
     rateLimitHolds = rateLimitHolds.filter { ids.contains($0.key) }
     // Settings apply live; display-only edits must not restart collection on every change.
     let restartCollection = CollectionInputs(updated) != CollectionInputs(document)
@@ -227,6 +237,13 @@ final class AppModel {
       claudePath = document.settings.claudePath
       codexPath = document.settings.codexPath
       interval = document.settings.validInterval
+    }
+  }
+  private func applyEmail(_ email: EmailObservation, to id: UUID) {
+    switch email {
+    case .address(let value): detectedEmails[id] = value
+    case .absent: detectedEmails.removeValue(forKey: id)
+    case .unknown: break
     }
   }
   func acceptIdentity(_ id: UUID) {

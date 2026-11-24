@@ -37,7 +37,7 @@ The logos identify account providers. Deltavee is not an official Anthropic or O
 
 ## Account Display
 
-- Each account shows `Claude` or `Codex`, with an optional secondary label. Long labels are shortened visually; tooltips and accessibility descriptions retain the full label.
+- Each account shows `Claude` or `Codex`, with an optional secondary label. Without a label, the sign-in email reported by the account's CLI appears there instead, if one is available; see [Local Data and Privacy](collection.md#local-data-and-privacy). Long labels are shortened at the end; long emails are shortened in the middle so the start and the domain stay visible. Tooltips and accessibility descriptions retain the full text.
 - `Weekly quota` shows used or remaining percentage. Colors always reflect consumption: teal below 70% used, orange from 70% to below 90%, and red at 90% or more. In remaining mode these are more than 30%, more than 10% through 30%, and 10% or less remaining. Missing or invalid usage has no graph or dot. Other usage windows are not shown; see [Usage Interpretation](collection.md#usage-interpretation).
 - `Resets` shows the quota reset time; `Updated` shows the original observation time, not the time a file was reread. Tooltips include full dates, the source, and the last successful read time.
 - `Time Ago` shows elapsed observation time in minutes or larger units; observations less than 1 minute old show `just now`. `Countdown` rounds reset time up to minutes. After a reset time passes, `Reset time passed` appears rather than assuming usage is zero.
@@ -56,7 +56,7 @@ The logos identify account providers. Deltavee is not an official Anthropic or O
 - Choose `Claude` or `Codex` from `Add Account` to open the new account's settings. The app fills in the provider's default configuration directory. If the CLI account uses a different directory, replace the default with that path. The provider cannot be changed afterward; add another account to use another provider.
 - Expand an account card to edit it; `⌘⌥E` expands or collapses all cards. The header switch controls menu bar visibility without expanding the card.
 - Drag the left-hand handle to reorder accounts; the order applies when you release it. VoiceOver actions can move accounts up or down, and reordering respects Reduce Motion.
-- `Label (optional)` adds a secondary label. Blank labels or labels matching the provider do not add another display line.
+- `Label (optional)` adds a secondary label. Blank labels or labels matching the provider do not add another display line; the detected sign-in email is shown instead when available, and the empty field then reads `Blank uses the sign-in email`.
 - A configuration directory is required. Clearing it shows a warning and keeps the last applied directory; a new account without a directory is not applied.
 - `Remove Account…` requires an inline `Remove this account?` confirmation with `Cancel` and `Remove`.
 

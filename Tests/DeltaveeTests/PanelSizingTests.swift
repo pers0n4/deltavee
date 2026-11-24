@@ -5,6 +5,14 @@ import XCTest
 
 @testable import Deltavee
 
+/// Reports one email on every fetch, so an unlabeled account shows it in the panel.
+private struct FixedEmailCollector: Collector {
+  let email: String
+  func fetch(_ account: Account) async -> Result<CollectedUsage, CollectError> {
+    .failure(CollectError(.authRequired, email: .address(email)))
+  }
+}
+
 final class PanelSizingTests: XCTestCase {
   /// The reset and Updated times fit one line at full size, without the shrink fallback, for
   /// every month, the widest clock times, and every display mode and time format.
@@ -413,6 +421,60 @@ final class PanelSizingTests: XCTestCase {
       XCTAssertEqual(window.contentLayoutRect.height, baseHeight, accuracy: 1)
     }
     XCTAssertEqual(model.document.accounts[0].id, account.id)
+  }
+
+  /// A long email keeps its domain end visible, while a long user label keeps its start.
+  @MainActor
+  func testLongEmailKeepsItsEndWhileLongLabelKeepsItsStart() async throws {
+    let local = "alexandra.konstantinopoulou.platform-team"
+    let emails = ["\(local)@north-region.example.com", "\(local)@north-region.example.org"]
+    let font = NSFont.preferredFont(forTextStyle: .caption1)
+    for email in emails {
+      XCTAssertGreaterThan(
+        (email as NSString).size(withAttributes: [.font: font]).width, PanelView.width,
+        "The email must be wider than the panel so it is cut")
+    }
+    let emailRows = try await [
+      panelBitmap(name: "", email: emails[0]),
+      panelBitmap(name: "", email: emails[1]),
+    ]
+    XCTAssertNotEqual(
+      emailRows[0].tiffRepresentation, emailRows[1].tiffRepresentation,
+      "Emails differing only at the end must look different")
+    // The same strings as labels: cutting the end makes them look the same.
+    let labelRows = try await [
+      panelBitmap(name: emails[0], email: emails[0]),
+      panelBitmap(name: emails[1], email: emails[0]),
+    ]
+    XCTAssertEqual(
+      labelRows[0].tiffRepresentation, labelRows[1].tiffRepresentation,
+      "A label keeps its start and loses its end")
+  }
+
+  @MainActor
+  private func panelBitmap(name: String, email: String) async throws -> NSBitmapImageRep {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let collector = FixedEmailCollector(email: email)
+    let scheduler = Scheduler(codex: collector, claude: collector)
+    let model = AppModel(
+      accountStore: AccountStore(directory: directory),
+      snapshotStore: SnapshotStore(directory: directory), makeScheduler: { _ in scheduler })
+    model.save(
+      AccountDocument(accounts: [Account(name: name, provider: .openai, configDir: "/fake/codex")]))
+    for _ in 0..<200 where model.detectedEmails.isEmpty {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    await scheduler.stop()
+    XCTAssertEqual(model.detectedEmails.values.first, email)
+    let window = makeWindow(model: model, maxHeight: 800)
+    defer {
+      window.contentView = nil
+      window.close()
+    }
+    window.appearance = NSAppearance(named: .darkAqua)
+    try await settle(window)
+    return try snapshot(window)
   }
 
   @MainActor

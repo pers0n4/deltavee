@@ -98,9 +98,27 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
     completionHandler: @escaping @Sendable (URLRequest?) -> Void
   ) { completionHandler(nil) }
 }
+/// The login recorded in Claude Code's `.claude.json`.
+public struct ClaudeIdentity: Equatable, Sendable {
+  public var fingerprint: String?
+  public var email: EmailObservation
+  public init(fingerprint: String?, email: EmailObservation) {
+    self.fingerprint = fingerprint
+    self.email = email
+  }
+  public static let unreadable = ClaudeIdentity(fingerprint: nil, email: .unknown)
+}
 public protocol ClaudeIdentityReading: Sendable {
   /// `variable` is the credential's; nil when no credential was read.
   func fingerprint(configDir: String, variable: ClaudeConfigDirVariable?) -> String?
+  /// The fingerprint and email of the same login. The default reports no email reading.
+  func read(configDir: String, variable: ClaudeConfigDirVariable?) -> ClaudeIdentity
+}
+extension ClaudeIdentityReading {
+  public func read(configDir: String, variable: ClaudeConfigDirVariable?) -> ClaudeIdentity {
+    ClaudeIdentity(
+      fingerprint: fingerprint(configDir: configDir, variable: variable), email: .unknown)
+  }
 }
 public struct ClaudeIdentityReader: ClaudeIdentityReading {
   private let globalConfig: @Sendable (String, ClaudeConfigDirVariable) -> URL
@@ -109,9 +127,12 @@ public struct ClaudeIdentityReader: ClaudeIdentityReading {
       Paths.claudeGlobalConfig(configDir: $0, variable: $1)
     }
   ) { self.globalConfig = globalConfig }
+  public func fingerprint(configDir: String, variable: ClaudeConfigDirVariable?) -> String? {
+    read(configDir: configDir, variable: variable).fingerprint
+  }
   /// Reads the `.claude.json` written alongside the credential's Keychain item. Without a credential,
   /// the most recently modified candidate stands for the login the CLI used last.
-  public func fingerprint(configDir: String, variable: ClaudeConfigDirVariable?) -> String? {
+  public func read(configDir: String, variable: ClaudeConfigDirVariable?) -> ClaudeIdentity {
     let candidates = (variable.map { [$0] } ?? Paths.claudeConfigDirVariables(configDir: configDir))
       .map { globalConfig(configDir, $0) }
     let modified = { (file: URL) in
@@ -122,11 +143,17 @@ public struct ClaudeIdentityReader: ClaudeIdentityReading {
         modified($0)! < modified($1)!
       }),
       let data = try? Data(contentsOf: file),
-      let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-      let account = root["oauthAccount"] as? [String: Any],
-      let identity = account["accountUuid"] as? String
-    else { return nil }
-    return Paths.fingerprint(identity)
+      let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return .unreadable }
+    // A subscription login stores `oauthAccount.accountUuid` and `oauthAccount.emailAddress`.
+    // Verified 2026-11-23 against Claude Code 2.1.328 by reading the key names in `~/.claude.json`
+    // and `~/.claude/.claude.json`. A file without `oauthAccount` or its email answers "no email".
+    guard let account = root["oauthAccount"] as? [String: Any] else {
+      return ClaudeIdentity(fingerprint: nil, email: .absent)
+    }
+    return ClaudeIdentity(
+      fingerprint: (account["accountUuid"] as? String).map(Paths.fingerprint),
+      email: EmailObservation.reported(account["emailAddress"]) ?? .absent)
   }
 }
 public protocol StatuslineReading: Sendable {
@@ -366,11 +393,12 @@ public struct ClaudeUsageCollector: Collector {
     self.refresher = refresher
   }
   public func fetch(_ account: Account) async -> Result<CollectedUsage, CollectError> {
-    // Statusline-only must not touch credentials, identity files, the CLI, or HTTP.
+    // Statusline-only must not touch credentials, identity files, the CLI, or HTTP. Without the
+    // identity file there is no email, so any email from an earlier source is cleared.
     if source == .statuslineOnly {
       guard let snapshot = statusline.read(configDir: account.expandedDirectory, now: clock.now())
-      else { return .failure(CollectError(.statuslineMissing)) }
-      return .success(CollectedUsage(snapshot))
+      else { return .failure(CollectError(.statuslineMissing, email: .absent)) }
+      return .success(CollectedUsage(snapshot, email: .absent))
     }
     var variable: ClaudeConfigDirVariable?
     do {
@@ -408,17 +436,18 @@ public struct ClaudeUsageCollector: Collector {
       default: throw CollectError(.http(response.status))
       }
       var snapshot = try Self.parse(response.body, now: clock.now())
-      snapshot.identityFingerprint = identity.fingerprint(
-        configDir: account.expandedDirectory, variable: variable)
-      return .success(CollectedUsage(snapshot))
+      let login = identity.read(configDir: account.expandedDirectory, variable: variable)
+      snapshot.identityFingerprint = login.fingerprint
+      return .success(CollectedUsage(snapshot, email: login.email))
     } catch {
       let collectError = error as? CollectError
+      let login = identity.read(configDir: account.expandedDirectory, variable: variable)
       var fallback = statusline.read(configDir: account.expandedDirectory, now: clock.now())
-      fallback?.identityFingerprint = identity.fingerprint(
-        configDir: account.expandedDirectory, variable: variable)
+      fallback?.identityFingerprint = login.fingerprint
       return .failure(
         CollectError(
-          collectError?.kind ?? .transport, fallback: fallback, retryAt: collectError?.retryAt))
+          collectError?.kind ?? .transport, fallback: fallback, retryAt: collectError?.retryAt,
+          email: login.email))
     }
   }
   /// Longest `Retry-After` honored; a larger value is clamped so a bad header cannot stop polling for days.

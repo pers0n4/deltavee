@@ -169,8 +169,9 @@ enum QuotaPresentation {
     return prefix + parts.joined(separator: " ")
   }
 
-  static func accountAccessibilityLabel(_ account: Account) -> String {
+  /// `email` is the account's detected email, used when the account has no label.
+  static func accountAccessibilityLabel(_ account: Account, email: String?) -> String {
     let provider = account.provider.displayName
-    return account.displayLabel.map { "\($0), \(provider)" } ?? provider
+    return account.displayLabel(email: email).map { "\($0), \(provider)" } ?? provider
   }
 }
