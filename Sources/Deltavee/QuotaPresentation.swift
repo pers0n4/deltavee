@@ -151,6 +151,49 @@ enum QuotaPresentation {
     "Rate limited · \(resumeText(release, mode: mode, now: now, timeFormat: timeFormat))"
   }
 
+  /// Panel line for banked resets, e.g. `3 resets · Use by Dec 1, 5:22 AM`. Nil when there are none.
+  /// When the response listed fewer resets than it counted, the expiry is the earliest listed one and
+  /// the line says how many were listed. Once that expiry passes, the count is only what the last read
+  /// reported, so the line says so instead of calling the resets available.
+  static func availableResetsText(
+    _ resets: AvailableResets, mode: TimeDisplayMode, now: Date, timeFormat: TimeFormat
+  ) -> String? {
+    guard resets.count > 0 else { return nil }
+    let count = "\(resets.count) \(resets.count == 1 ? "reset" : "resets")"
+    guard let expiry = resets.earliestListedExpiry else { return "\(count) available" }
+    guard expiry > now else { return "Last reported: \(resets.count) · Expiry passed" }
+    let due =
+      mode == .absolute
+      ? "Use by \(dateText(expiry, compact: true, timeFormat: timeFormat))"
+      : countdown(expiry, now: now, prefix: "Expires in ")
+    // The expiry covers only the listed resets, so say how many those were.
+    guard !resets.listsAll, let listed = resets.listedCount else { return "\(count) · \(due)" }
+    return "\(count) · \(listed) listed · \(due)"
+  }
+
+  /// Full description for the tooltip and VoiceOver. Nil when there are no resets.
+  static func availableResetsDetails(
+    _ resets: AvailableResets, now: Date, timeFormat: TimeFormat
+  ) -> String? {
+    guard resets.count > 0 else { return nil }
+    let elapsed = resets.earliestListedExpiry.map { $0 <= now } ?? false
+    let noun = "banked \(resets.count == 1 ? "reset" : "resets")"
+    var text =
+      elapsed
+      ? "Last read reported \(resets.count) \(noun); refresh to see what remains."
+      : "\(resets.count) \(noun) available."
+    let partial = !resets.listsAll
+    if let listed = resets.listedCount, partial { text += " \(listed) listed." }
+    guard let expiry = resets.earliestListedExpiry else { return text }
+    let date = dateText(expiry, compact: false, timeFormat: timeFormat)
+    text +=
+      expiry > now
+      ? " \(partial ? "Earliest listed expiry" : "Earliest expiry"): \(date)."
+      : " \(partial ? "Earliest listed reset" : "Earliest reset") expired \(date)."
+    if partial { text += " Unlisted resets may expire sooner." }
+    return text
+  }
+
   private static func countdown(_ reset: Date, now: Date, prefix: String) -> String {
     let seconds = reset.timeIntervalSince(now)
     guard seconds.isFinite else { return "Reset time unavailable" }

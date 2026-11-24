@@ -4,7 +4,8 @@ import Foundation
 // One-shot live check of the collectors without the menubar UI.
 // Usage: deltavee-probe <claude|codex> <configDir>
 //        deltavee-probe icon   (menubar title rendered from the app's persisted accounts.json/snapshots.json)
-// Prints only percentages, times, source, and failure kind. Never prints tokens or identity values.
+// Prints only percentages, times, banked reset counts, source, and failure kind. Never prints tokens or
+// identity values.
 let arguments = CommandLine.arguments
 if arguments.count == 2, arguments[1] == "icon" {
   do {
@@ -33,8 +34,13 @@ func describe(_ snapshot: QuotaSnapshot) -> String {
   let formatter = ISO8601DateFormatter()
   let weekly = snapshot.weeklyUsedPercent.map { String(format: "%.1f%%", $0) } ?? "--"
   let reset = snapshot.weeklyResetsAt.map { formatter.string(from: $0) } ?? "-"
+  let resets = snapshot.availableResets.map { value in
+    let listed = value.listedCount.map(String.init) ?? "-"
+    let expiry = value.earliestListedExpiry.map { formatter.string(from: $0) } ?? "-"
+    return "\(value.count) listed=\(listed) earliestListedExpiry=\(expiry)"
+  }
   return
-    "weekly=\(weekly) resetsAt=\(reset) observedAt=\(formatter.string(from: snapshot.observedAt)) source=\(snapshot.source.rawValue) identity=\(snapshot.identityFingerprint == nil ? "absent" : "present")"
+    "weekly=\(weekly) resetsAt=\(reset) resets=\(resets ?? "unknown") observedAt=\(formatter.string(from: snapshot.observedAt)) source=\(snapshot.source.rawValue) identity=\(snapshot.identityFingerprint == nil ? "absent" : "present")"
 }
 
 switch await collector.fetch(account) {

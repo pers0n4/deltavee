@@ -407,4 +407,39 @@ final class QuotaPresentationTests: XCTestCase {
       QuotaPresentation.observationDetails(snapshot, timeFormat: .hour12).contains(
         "Last read:"))
   }
+
+  func testAvailableResetsTextNamesListedSubsetAndDropsPassedExpiry() throws {
+    let expiry = try localDate(month: 12, day: 1, hour: 5, minute: 22)
+    let before = expiry.addingTimeInterval(-(2 * 86400 + 3600))
+    func text(_ resets: AvailableResets, _ mode: TimeDisplayMode = .absolute, now: Date? = nil)
+      -> String?
+    {
+      QuotaPresentation.availableResetsText(
+        resets, mode: mode, now: now ?? before, timeFormat: .hour12)
+    }
+    let all = AvailableResets(count: 3, listedCount: 3, earliestListedExpiry: expiry)
+    XCTAssertEqual(text(all), "3 resets · Use by Dec 1, 5:22 AM")
+    XCTAssertEqual(text(all, .relative), "3 resets · Expires in 2d 1h")
+    let capped = AvailableResets(count: 5, listedCount: 1, earliestListedExpiry: expiry)
+    XCTAssertEqual(text(capped), "5 resets · 1 listed · Use by Dec 1, 5:22 AM")
+    XCTAssertEqual(text(AvailableResets(count: 1)), "1 reset available")
+    // At and after the expiry the count is history, not an available entitlement.
+    let one = AvailableResets(count: 1, listedCount: 1, earliestListedExpiry: expiry)
+    XCTAssertEqual(
+      text(one, now: expiry.addingTimeInterval(-60)), "1 reset · Use by Dec 1, 5:22 AM")
+    XCTAssertEqual(text(one, now: expiry), "Last reported: 1 · Expiry passed")
+    XCTAssertEqual(text(all, .relative, now: expiry + 1), "Last reported: 3 · Expiry passed")
+    XCTAssertNil(text(AvailableResets(count: 0, listedCount: 0)))
+
+    let cappedDetails = try XCTUnwrap(
+      QuotaPresentation.availableResetsDetails(capped, now: before, timeFormat: .hour12))
+    XCTAssertTrue(cappedDetails.contains("Earliest listed expiry: Dec 1, 2030 at 5:22 AM"))
+    XCTAssertTrue(cappedDetails.contains("Unlisted resets may expire sooner"))
+    let allDetails = try XCTUnwrap(
+      QuotaPresentation.availableResetsDetails(all, now: expiry, timeFormat: .hour12))
+    XCTAssertTrue(allDetails.hasPrefix("Last read reported 3 banked resets"))
+    XCTAssertFalse(allDetails.contains("available"))
+    XCTAssertTrue(allDetails.contains("Earliest reset expired"))
+    XCTAssertFalse(allDetails.contains("Unlisted"))
+  }
 }

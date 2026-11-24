@@ -33,7 +33,7 @@ Deltavee는 같은 제공자의 계정 여러 개를 포함해 Claude·Codex 계
 ## 기능
 
 - 메뉴바에 계정별 주간 사용량을 제공자 로고와 함께 표시합니다. 기본은 남은 비율이고, 사용한 비율로 바꿀 수 있습니다. 끝의 `!`는 마지막 조회 실패를 뜻합니다. 1시간 넘게 지난 값은 흐린 색으로 표시하며, `Color menu bar usage`를 켜면 빈 점으로 구분합니다.
-- 패널에는 사용한 비율에 따라 색이 바뀌는 주간 사용량 막대와 한도 초기화 시각을 표시합니다.
+- 패널에는 사용한 비율에 따라 색이 바뀌는 주간 사용량 막대와 한도 초기화 시각을 표시합니다. Codex 계정에는 보유한 banked reset 개수와 Codex가 알려 준 목록에서 가장 이른 만료 시각도 표시합니다.
 - 계정마다 레이블을 붙이고, 드래그로 순서를 바꾸고, 메뉴바 표시 여부를 정할 수 있습니다. 레이블이 없는 계정에는 로그인한 이메일을 표시합니다.
 - 전체 계정의 사용량을 주기적으로 조회하거나 계정 하나를 즉시 조회합니다. Claude OAuth 요청이 제한되면 대기한 뒤 다시 조회합니다.
 - 토큰을 저장하지 않습니다. `Statusline Only` 모드에서는 Claude 사용량을 확인할 때 키체인을 읽거나 제공자에게 직접 요청하지 않습니다.
@@ -44,7 +44,7 @@ Deltavee는 같은 제공자의 계정 여러 개를 포함해 Claude·Codex 계
 
 - Codex: 계정별로 Codex CLI를 실행해 주간 사용량을 조회합니다. 앱은 `auth.json`을 읽거나 쓰지 않습니다. OpenAI는 로컬 또는 오픈소스 앱의 app-server 인증을 허용하지만, 상업·호스팅 서비스에는 허용하지 않습니다([Codex app-server](https://learn.chatgpt.com/docs/app-server#auth-endpoints)).
 - Claude: CLI의 인증 정보로 비공식 API에 사용량을 요청하고, 조회에 실패하면 상태줄 기록을 읽습니다. 앱은 갱신 토큰을 사용하거나 인증 정보를 저장하지 않습니다. 액세스 토큰이 만료되면 백그라운드에서 Claude Code를 실행할 수 있습니다. [토큰 갱신과 사용량 비용](docs/collection.md#claude-token-expiration-and-cli-refresh)을 참고하세요.
-- 주간 사용량만 수집합니다. 5시간 한도 등 다른 한도는 표시하지 않습니다.
+- 주간 사용량만 수집합니다. 5시간 한도 등 다른 한도는 표시하지 않습니다. banked reset은 Codex만 표시하고 Claude는 표시하지 않습니다.
 - 앱 데이터는 `~/Library/Application Support/dev.pers0n4.deltavee/`에 저장하며 토큰은 저장하지 않습니다.
 
 조회·재시도 방식, 데이터 저장, 계정 위험은 [수집 동작](docs/collection.md), 표시 설정과 업데이트 알림은 [화면 안내](docs/interface.md)를 참고하세요.

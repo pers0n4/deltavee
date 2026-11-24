@@ -21,6 +21,7 @@ Codex uses the [official app-server's usage reporting](https://learn.chatgpt.com
 ## Usage Interpretation
 
 - **Weekly usage only:** Deltavee displays one weekly quota per account, not 5-hour or per-model limits. A provider may report the weekly quota as unavailable. An unexpected response format is reported as an error.
+- **Codex banked resets:** The same app-server usage reply also reports banked resets, which Deltavee shows with the weekly quota. A reply without reset information or with an unexpected reset format leaves resets unknown without failing the weekly quota. Deltavee only reads them and never redeems one. Claude resets are not shown.
 - **Stale values:** A value becomes stale after 1 hour without a new observation. Rereading an old statusline file does not make it current.
 - **Failures:** A failed fetch keeps the previous observation unless a newer local statusline observation is available. Showing a newer statusline value does not clear the failure. If credentials are missing or rejected, sign in through the CLI.
 - **Account changes:** When Deltavee detects a different account in the same configuration directory, it asks you to confirm in the panel before showing that account's usage. `Statusline Only` does not detect account changes.

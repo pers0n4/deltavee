@@ -120,9 +120,12 @@ public struct QuotaSnapshot: Codable, Equatable, Sendable {
   public var fetchedAt: Date
   public var source: UsageSource
   public var identityFingerprint: String?
+  /// Banked resets read in the same response as the quota; nil when that response did not report them.
+  /// Never copied from another observation, so a source that cannot report them shows them as unknown.
+  public var availableResets: AvailableResets?
   public init(
     weeklyUsedPercent: Double?, weeklyResetsAt: Date? = nil, observedAt: Date, fetchedAt: Date,
-    source: UsageSource, identityFingerprint: String? = nil
+    source: UsageSource, identityFingerprint: String? = nil, availableResets: AvailableResets? = nil
   ) {
     self.weeklyUsedPercent = weeklyUsedPercent
     self.weeklyResetsAt = weeklyResetsAt
@@ -130,11 +133,30 @@ public struct QuotaSnapshot: Codable, Equatable, Sendable {
     self.fetchedAt = fetchedAt
     self.source = source
     self.identityFingerprint = identityFingerprint
+    self.availableResets = availableResets
   }
   /// Chosen age threshold for stale values. Every
   /// refresh interval choice in `Settings.intervalChoices` stays below it.
   public static let staleAfter: TimeInterval = 3600
   public func isStale(now: Date) -> Bool { now.timeIntervalSince(observedAt) > Self.staleAfter }
+}
+/// One-time usage-limit resets a provider keeps on the account until the user redeems them or they expire.
+public struct AvailableResets: Codable, Equatable, Sendable {
+  /// Resets the provider counts as available.
+  public var count: Int
+  /// Available resets the response listed with details; nil when it sent only the count. The provider
+  /// may cap the list, so this can be less than `count`.
+  public var listedCount: Int?
+  /// Earliest expiry among the listed available resets, which is not necessarily the earliest one the
+  /// account holds when the list is shorter than `count`. Nil when none listed has an expiry.
+  public var earliestListedExpiry: Date?
+  public init(count: Int, listedCount: Int? = nil, earliestListedExpiry: Date? = nil) {
+    self.count = count
+    self.listedCount = listedCount
+    self.earliestListedExpiry = earliestListedExpiry
+  }
+  /// Whether the listed resets cover every available one, so the earliest listed expiry is the earliest held.
+  public var listsAll: Bool { listedCount.map { $0 >= count } ?? false }
 }
 public enum FailureKind: Codable, Equatable, Sendable {
   case binaryNotFound, schema, rateLimited

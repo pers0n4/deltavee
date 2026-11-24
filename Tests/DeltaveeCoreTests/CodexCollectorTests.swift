@@ -157,4 +157,54 @@ final class CodexCollectorTests: CoreTestCase {
     let decoded = try JSONDecoder().decode(CollectError.self, from: encoded)
     XCTAssertEqual(decoded, CollectError(.authRequired, retryAt: now))
   }
+  private func parseResets(_ summary: String) throws -> QuotaSnapshot {
+    try CodexAppServerCollector.parse(
+      Data(
+        "{\"result\":{\"rateLimits\":{\"primary\":{\"usedPercent\":40,\"windowDurationMins\":10080}},\"rateLimitResetCredits\":\(summary)}}"
+          .utf8), now: now)
+  }
+  private func credit(_ status: String, expiresAt: String) -> String {
+    "{\"id\":\"fake\",\"resetType\":\"codexRateLimits\",\"status\":\"\(status)\",\"grantedAt\":1,\"expiresAt\":\(expiresAt)}"
+  }
+  func testResetCreditsCountAndEarliestAvailableExpiry() throws {
+    let credits = [
+      credit("available", expiresAt: "1900900000"), credit("redeemed", expiresAt: "1900100000"),
+      credit("available", expiresAt: "1900200000"), credit("available", expiresAt: "null"),
+    ].joined(separator: ",")
+    let value = try parseResets("{\"availableCount\":3,\"credits\":[\(credits)]}")
+    XCTAssertEqual(value.weeklyUsedPercent, 40)
+    let resets = try XCTUnwrap(value.availableResets)
+    XCTAssertEqual(resets.count, 3)
+    XCTAssertEqual(resets.listedCount, 3, "A redeemed credit is not listed as available")
+    XCTAssertEqual(
+      resets.earliestListedExpiry, Date(timeIntervalSince1970: 1_900_200_000),
+      "The redeemed credit's earlier expiry and the non-expiring credit are skipped")
+    XCTAssertTrue(resets.listsAll)
+  }
+  func testCappedOrMissingDetailsDoNotClaimAllResetsListed() throws {
+    let capped = try XCTUnwrap(
+      parseResets(
+        "{\"availableCount\":5,\"credits\":[\(credit("available", expiresAt: "1900900000"))]}"
+      ).availableResets)
+    XCTAssertEqual(capped.listedCount, 1)
+    XCTAssertFalse(capped.listsAll)
+    let countOnly = try XCTUnwrap(
+      parseResets("{\"availableCount\":2,\"credits\":null}").availableResets)
+    XCTAssertEqual(countOnly, AvailableResets(count: 2))
+    XCTAssertFalse(countOnly.listsAll)
+    XCTAssertEqual(
+      try parseResets("{\"availableCount\":0,\"credits\":[]}").availableResets,
+      AvailableResets(count: 0, listedCount: 0))
+  }
+  func testMissingOrMalformedResetCreditsAreUnknownWithoutFailingQuota() throws {
+    XCTAssertNil(try CodexAppServerCollector.parse(fixture("codex"), now: now).availableResets)
+    for summary in [
+      "null", "[]", "{}", "{\"availableCount\":-1}", "{\"availableCount\":1.5}",
+      "{\"availableCount\":true}", "{\"availableCount\":\"3\"}",
+    ] {
+      let value = try parseResets(summary)
+      XCTAssertEqual(value.weeklyUsedPercent, 40, summary)
+      XCTAssertNil(value.availableResets, summary)
+    }
+  }
 }

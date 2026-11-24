@@ -77,6 +77,27 @@ final class ModelsTests: CoreTestCase {
     XCTAssertEqual(state, .authRequired(lastSuccess: new))
     XCTAssertTrue(state.showsCLICommand)
   }
+  /// A newer statusline fallback cannot report banked resets and may belong to another login, so the
+  /// older observation's resets are not carried onto it; a failure without a fallback keeps them.
+  func testBankedResetsStayWithTheirOwnObservation() {
+    var a = account()
+    var old = snapshot(observedAt: now.addingTimeInterval(-500))
+    old.availableResets = AvailableResets(count: 2, listedCount: 2, earliestListedExpiry: now)
+    let fallback = snapshot(observedAt: now.addingTimeInterval(-200), used: 72)
+    let replaced = StateReducer.applying(
+      .failure(CollectError(.transport, fallback: fallback)), to: .ok(old), account: &a)
+    XCTAssertEqual(replaced.lastSuccess?.weeklyUsedPercent, 72)
+    XCTAssertNil(replaced.lastSuccess?.availableResets)
+    let kept = StateReducer.applying(
+      .failure(CollectError(.process)), to: .ok(old), account: &a)
+    XCTAssertEqual(kept.lastSuccess?.availableResets, old.availableResets)
+  }
+  func testSnapshotsSavedBeforeBankedResetsStillDecode() throws {
+    let json = #"{"weeklyUsedPercent":12,"observedAt":0,"fetchedAt":0,"source":"codexAppServer"}"#
+    let value = try JSONDecoder().decode(QuotaSnapshot.self, from: Data(json.utf8))
+    XCTAssertEqual(value.weeklyUsedPercent, 12)
+    XCTAssertNil(value.availableResets)
+  }
   func testTokenExpiryKeepsItsOwnStateAndNewerFallback() {
     var a = account()
     let old = snapshot(observedAt: now.addingTimeInterval(-500))

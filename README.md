@@ -33,7 +33,7 @@ It tracks several Claude and Codex accounts side by side, including more than on
 ## Features
 
 - Shows each account's weekly quota next to its provider logo in the menu bar, as the remaining share by default or as the used share. A trailing `!` marks a failed last fetch. Values more than an hour old are dimmed, or shown with a hollow dot when `Color menu bar usage` is enabled.
-- The panel shows a weekly quota bar, colored by how much of the quota is used, and the reset time.
+- The panel shows a weekly quota bar, colored by how much of the quota is used, and the reset time. Codex accounts also show how many banked resets they hold and the earliest expiry Codex lists for them.
 - Accounts can be labeled, reordered by dragging, and hidden from the menu bar. An unlabeled account shows its sign-in email.
 - Fetches usage for all accounts on a schedule or for one account on demand. After a Claude OAuth rate limit, it waits before trying again.
 - Stores no tokens. Claude's `Statusline Only` mode disables Keychain and network access for Claude usage collection.
@@ -44,7 +44,7 @@ It tracks several Claude and Codex accounts side by side, including more than on
 
 - Codex: Runs the Codex CLI for each account to fetch weekly limits. The app does not read or write `auth.json`. OpenAI permits app-server authentication for local or open-source apps, but not for commercial or hosted services ([Codex app-server](https://learn.chatgpt.com/docs/app-server#auth-endpoints)).
 - Claude: Fetches usage through an unofficial API with the CLI's credentials, falling back to statusline records on failure. The app does not use refresh tokens or store credentials. When the access token expires, it can run Claude Code in the background; see [token refresh and usage costs](docs/collection.md#claude-token-expiration-and-cli-refresh).
-- Collects weekly usage only. Five-hour and other limits are not shown.
+- Collects weekly usage only. Five-hour and other limits are not shown. Banked resets are shown for Codex only, not Claude.
 - App data is stored in `~/Library/Application Support/dev.pers0n4.deltavee/`. Tokens are not stored.
 
 See [collection details](docs/collection.md) for refresh behavior, data storage, and account risks, and [interface guidance](docs/interface.md) for display settings and update notices.

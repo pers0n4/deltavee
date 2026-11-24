@@ -328,6 +328,27 @@ struct RateLimitNote: View {
   }
 }
 
+/// Banked resets under the status line, left-aligned with the reset time. Absent when there are none
+/// or when the observation did not report them.
+struct AvailableResetsLine: View {
+  let resets: AvailableResets
+  let now: Date
+  let resetTimeMode: TimeDisplayMode
+  let timeFormat: TimeFormat
+  var body: some View {
+    if let text = QuotaPresentation.availableResetsText(
+      resets, mode: resetTimeMode, now: now, timeFormat: timeFormat),
+      let details = QuotaPresentation.availableResetsDetails(
+        resets, now: now, timeFormat: timeFormat)
+    {
+      HStack {
+        Text(text).lineLimit(1).help(details).accessibilityLabel(details)
+        Spacer(minLength: 0)
+      }.font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+    }
+  }
+}
+
 private struct AccountRow: View {
   let account: Account
   /// Detected email, shown when the account has no label.
@@ -416,6 +437,10 @@ private struct AccountRow: View {
           AccountStatusLine(
             stale: snapshot.isStale(now: now), heldUntil: heldUntil, now: now,
             resetTimeMode: resetTimeMode, timeFormat: timeFormat)
+          if let resets = snapshot.availableResets {
+            AvailableResetsLine(
+              resets: resets, now: now, resetTimeMode: resetTimeMode, timeFormat: timeFormat)
+          }
         }
       }
       if state.lastSuccess == nil, let heldUntil {
