@@ -57,6 +57,31 @@ private actor ControlledCollector: Collector {
     continuation.resume()
   }
 }
+/// Holds its first fetch until `open()`, then answers it with a rate limit even if cancelled,
+/// like a response that already arrived. Later fetches fail with a schema error.
+private actor GatedRateLimitCollector: Collector {
+  let retryAt: Date
+  private(set) var fetches = 0
+  private var gate: CheckedContinuation<Void, Never>?
+  private(set) var cancelled = false
+  init(retryAt: Date) { self.retryAt = retryAt }
+  func fetch(_ account: Account) async -> Result<CollectedUsage, CollectError> {
+    fetches += 1
+    guard fetches == 1 else { return .failure(CollectError(.schema)) }
+    await withTaskCancellationHandler {
+      await withCheckedContinuation { gate = $0 }
+    } onCancel: {
+      Task { await self.markCancelled() }
+    }
+    return .failure(CollectError(.rateLimited, retryAt: retryAt))
+  }
+  private func markCancelled() { cancelled = true }
+  var waiting: Bool { gate != nil }
+  func open() {
+    gate?.resume()
+    gate = nil
+  }
+}
 
 final class SchedulerTests: CoreTestCase {
   private func eventually(_ predicate: () async -> Bool) async -> Bool {
@@ -210,6 +235,30 @@ final class SchedulerTests: CoreTestCase {
     let fetched = await eventually { await collector.count == 2 }
     XCTAssertTrue(fetched)
     await expired.stop()
+    await scheduler.stop()
+  }
+  func testRefreshDuringRateLimitedFetchWaitsForItsRelease() async {
+    let a = account()
+    let retryAt = now.addingTimeInterval(5000)
+    let collector = GatedRateLimitCollector(retryAt: retryAt)
+    let recorder = ErrorRecorder()
+    let scheduler = Scheduler(codex: collector, claude: collector, clock: FixedClock(date: now))
+    await scheduler.start(accounts: [a], interval: 600) { await recorder.record($1) }
+    let started = await eventually { await collector.waiting }
+    XCTAssertTrue(started)
+    // The refresh cancels the held fetch; its rate limit must still be reported and honored.
+    let refresh = Task { await scheduler.refresh(accountID: a.id) }
+    let cancelled = await eventually { await collector.cancelled }
+    XCTAssertTrue(cancelled)
+    await collector.open()
+    await refresh.value
+    let delivered = await eventually { await recorder.errors.count == 1 }
+    XCTAssertTrue(delivered)
+    try? await Task.sleep(for: .milliseconds(50))
+    let fetches = await collector.fetches
+    let errors = await recorder.errors
+    XCTAssertEqual(fetches, 1)
+    XCTAssertEqual(errors.first?.retryAt, retryAt)
     await scheduler.stop()
   }
   func testSchedulerUsesBackoffAsReleaseWithoutRetryAfter() async {

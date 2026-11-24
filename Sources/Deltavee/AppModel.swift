@@ -113,18 +113,22 @@ final class AppModel {
     rateLimitHolds = rateLimitHolds.filter { hold in
       hold.value > now && accounts.contains { $0.id == hold.key }
     }
-    let holds = rateLimitHolds.filter { hold in
-      accounts.contains { $0.id == hold.key && usesRateLimitedSource($0, settings: settings) }
-    }
     // Held accounts fetch only after their release time, so they are not shown as refreshing.
     refreshingAccountIDs = Set(accounts.map(\.id).filter { !isRateLimitHeld($0, now: now) })
-    configurationTask?.cancel()
+    let previousConfiguration = configurationTask
+    previousConfiguration?.cancel()
     let previous = scheduler
     let next = makeScheduler(settings)
     scheduler = next
     configurationTask = Task { [weak self] in
+      // One handover at a time: a cancelled earlier handover still stops its scheduler, and a
+      // rate limit that scheduler's last fetch reports must reach the holds read below.
+      await previousConfiguration?.value
       await previous?.stop()
-      guard !Task.isCancelled else { return }
+      guard !Task.isCancelled, let self else { return }
+      let holds = rateLimitHolds.filter { hold in
+        accounts.contains { $0.id == hold.key && usesRateLimitedSource($0, settings: settings) }
+      }
       await next.start(accounts: accounts, interval: settings.validInterval, holds: holds) {
         [weak self] account, result in
         await self?.receive(account: account, result: result, generation: current)
@@ -147,9 +151,11 @@ final class AppModel {
   private func receive(
     account: Account, result: Result<CollectedUsage, CollectError>, generation: UUID
   ) {
-    guard generation == self.generation,
-      let index = document.accounts.firstIndex(where: { $0.id == account.id })
-    else { return }
+    guard let index = document.accounts.firstIndex(where: { $0.id == account.id }) else { return }
+    guard generation == self.generation else {
+      recordLateRateLimit(account: account, result: result, index: index)
+      return
+    }
     refreshingAccountIDs.remove(account.id)
     let candidate: QuotaSnapshot?
     switch result {
@@ -181,6 +187,26 @@ final class AppModel {
       pendingIdentities.removeValue(forKey: account.id)
     }
     states[account.id] = updated
+    persist()
+    tick()
+  }
+  /// A rate limit reported by an earlier collection still binds the account's OAuth source, even
+  /// after a refresh or a switch to Statusline Only. The hold applies only while the account still
+  /// reads the same directory; other late results are dropped.
+  private func recordLateRateLimit(
+    account: Account, result: Result<CollectedUsage, CollectError>, index: Int
+  ) {
+    let current = document.accounts[index]
+    guard case .failure(let error) = result, error.kind == .rateLimited,
+      let release = error.retryAt, current.provider == account.provider,
+      current.expandedDirectory == account.expandedDirectory
+    else { return }
+    rateLimitHolds[account.id] = release
+    // The new collection skips this account until the release time, so nothing else would end its
+    // busy state. Statusline Only ignores the hold and ends it with its own read.
+    if usesRateLimitedSource(current, settings: document.settings) {
+      refreshingAccountIDs.remove(account.id)
+    }
     persist()
     tick()
   }

@@ -41,6 +41,34 @@ private actor EmailCollector: Collector {
   var count: Int { fetches }
 }
 
+/// Holds its first fetch until `open()` and then answers it with a rate limit, ignoring
+/// cancellation the way an HTTP response that already arrived does. Later fetches succeed.
+private actor GatedRateLimitCollector: Collector {
+  let retryAt: Date
+  private(set) var fetches = 0
+  private var gate: CheckedContinuation<Void, Never>?
+  private var opened = false
+  init(retryAt: Date) { self.retryAt = retryAt }
+  func fetch(_ account: Account) async -> Result<CollectedUsage, CollectError> {
+    fetches += 1
+    guard fetches == 1 else {
+      return .success(
+        CollectedUsage(
+          QuotaSnapshot(
+            weeklyUsedPercent: 10, observedAt: Date(), fetchedAt: Date(),
+            source: .claudeStatusline)))
+    }
+    if !opened { await withCheckedContinuation { gate = $0 } }
+    return .failure(CollectError(.rateLimited, retryAt: retryAt))
+  }
+  var waiting: Bool { gate != nil }
+  func open() {
+    opened = true
+    gate?.resume()
+    gate = nil
+  }
+}
+
 /// A clock whose time moves only through `advance(by:)`; sleepers resume once it reaches their deadline.
 // `lock` guards `current` and `sleepers`; continuations are resumed after the lock is released.
 private final class ManualClock: Clock, @unchecked Sendable {
@@ -385,6 +413,96 @@ final class AppModelTests: XCTestCase {
       try await Task.sleep(for: .milliseconds(10))
     }
     XCTFail("Timed out waiting for model refresh")
+  }
+
+  /// A Claude account, its first fetch held by `collector`, and every scheduler the model made.
+  @MainActor
+  private func gatedModel(
+    _ directory: URL, collector: GatedRateLimitCollector
+  ) async throws -> (AppModel, Account, () -> [Scheduler]) {
+    var schedulers: [Scheduler] = []
+    let model = AppModel(
+      accountStore: AccountStore(directory: directory),
+      snapshotStore: SnapshotStore(directory: directory),
+      makeScheduler: { _ in
+        let scheduler = Scheduler(codex: collector, claude: collector)
+        schedulers.append(scheduler)
+        return scheduler
+      })
+    let account = Account(name: "", provider: .anthropic, configDir: "/fake/claude")
+    model.save(AccountDocument(accounts: [account]))
+    try await waitAsync { await collector.waiting }
+    return (model, account, { schedulers })
+  }
+
+  private func wholeSecondsFromNow(_ seconds: TimeInterval) -> Date {
+    // Whole seconds survive the JSON round trip exactly.
+    Date(timeIntervalSince1970: (Date().timeIntervalSince1970 + seconds).rounded())
+  }
+
+  @MainActor
+  func testRefreshesDuringARateLimitedFetchKeepItsHold() async throws {
+    for refreshes in [1, 2] {
+      let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString)
+      defer { try? FileManager.default.removeItem(at: directory) }
+      let release = wholeSecondsFromNow(3600)
+      let collector = GatedRateLimitCollector(retryAt: release)
+      let (model, account, schedulers) = try await gatedModel(directory, collector: collector)
+      // Back to back, the second refresh must still wait for the first scheduler to stop.
+      for _ in 0..<refreshes { model.refresh() }
+      // Give the handovers time to run; a new scheduler that skipped ahead would fetch now.
+      try await Task.sleep(for: .milliseconds(100))
+      await collector.open()
+      try await wait { model.rateLimitHolds[account.id] == release }
+      try await wait { model.refreshingAccountIDs.isEmpty }
+      try await Task.sleep(for: .milliseconds(100))
+      let fetches = await collector.fetches
+      XCTAssertEqual(fetches, 1, "\(refreshes) refresh(es) must not fetch before the release")
+      XCTAssertEqual(try RateLimitStore(directory: directory).load(), [account.id: release])
+      for scheduler in schedulers() { await scheduler.stop() }
+    }
+  }
+
+  @MainActor
+  func testLateRateLimitHoldsOAuthButNotStatuslineReads() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let release = wholeSecondsFromNow(3600)
+    let collector = GatedRateLimitCollector(retryAt: release)
+    let (model, account, schedulers) = try await gatedModel(directory, collector: collector)
+    var document = model.document
+    document.settings.claudeSource = .statuslineOnly
+    model.save(document)
+    await collector.open()
+    try await wait { model.rateLimitHolds[account.id] == release }
+    // Statusline Only reads right away and ends the busy state with its own result.
+    try await waitAsync { await collector.fetches == 2 }
+    try await wait { model.refreshingAccountIDs.isEmpty }
+    XCTAssertFalse(model.isRateLimitHeld(account.id))
+    document.settings.claudeSource = .oauthWithStatusline
+    model.save(document)
+    XCTAssertTrue(model.isRateLimitHeld(account.id), "Returning to OAuth keeps the earlier wait")
+    try await Task.sleep(for: .milliseconds(100))
+    let fetches = await collector.fetches
+    XCTAssertEqual(fetches, 2)
+    for scheduler in schedulers() { await scheduler.stop() }
+  }
+
+  @MainActor
+  func testLateRateLimitIsDroppedAfterTheDirectoryChanges() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let collector = GatedRateLimitCollector(retryAt: wholeSecondsFromNow(3600))
+    let (model, account, schedulers) = try await gatedModel(directory, collector: collector)
+    var document = model.document
+    document.accounts[0].configDir = "/fake/other-claude"
+    model.save(document)
+    await collector.open()
+    try await waitAsync { await collector.fetches == 2 }
+    try await wait { model.refreshingAccountIDs.isEmpty }
+    XCTAssertNil(model.rateLimitHolds[account.id])
+    for scheduler in schedulers() { await scheduler.stop() }
   }
 
   @MainActor

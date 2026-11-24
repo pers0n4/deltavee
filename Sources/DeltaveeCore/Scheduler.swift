@@ -84,7 +84,9 @@ public actor Scheduler {
           }
         }
         var result = await collector.fetch(account)
-        guard !Task.isCancelled else { return }
+        // A cancelled fetch's result is dropped, except a rate limit: the server counted that
+        // request, so the release time must reach the next fetch and the caller.
+        let cancelled = Task.isCancelled
         switch result {
         case .success: failures = 0
         case .failure: failures += 1
@@ -98,9 +100,11 @@ public actor Scheduler {
           setHold(release, for: account.id)
           delay = release.timeIntervalSince(now)
         } else {
+          guard !cancelled else { return }
           setHold(nil, for: account.id)
         }
         await onResult(account, result)
+        if cancelled { return }
         do {
           try await Task.sleep(for: .seconds(delay))
         } catch { return }
