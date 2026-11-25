@@ -422,7 +422,7 @@ final class QuotaPresentationTests: XCTestCase {
     XCTAssertEqual(text(all, .relative), "3 resets · Expires in 2d 1h")
     let capped = AvailableResets(count: 5, listedCount: 1, earliestListedExpiry: expiry)
     XCTAssertEqual(text(capped), "5 resets · 1 listed · Use by Dec 1, 5:22 AM")
-    XCTAssertEqual(text(AvailableResets(count: 1)), "1 reset available")
+    XCTAssertEqual(text(AvailableResets(count: 1)), "1 reset held")
     // At and after the expiry the count is history, not an available entitlement.
     let one = AvailableResets(count: 1, listedCount: 1, earliestListedExpiry: expiry)
     XCTAssertEqual(
@@ -438,8 +438,54 @@ final class QuotaPresentationTests: XCTestCase {
     let allDetails = try XCTUnwrap(
       QuotaPresentation.availableResetsDetails(all, now: expiry, timeFormat: .hour12))
     XCTAssertTrue(allDetails.hasPrefix("Last read reported 3 banked resets"))
-    XCTAssertFalse(allDetails.contains("available"))
+    XCTAssertFalse(allDetails.contains("held"))
     XCTAssertTrue(allDetails.contains("Earliest reset expired"))
     XCTAssertFalse(allDetails.contains("Unlisted"))
+  }
+
+  /// Claude says which limits each reset restores; the panel names how many restore the weekly quota
+  /// when that is not all of them, and the tooltip gives each group its own earliest expiry.
+  func testAvailableResetsNamesWeeklySubsetOnlyWhenMixed() throws {
+    let weeklyExpiry = try localDate(month: 12, day: 10, hour: 22, minute: 0)
+    let otherExpiry = try localDate(year: 2031, month: 3, day: 9, hour: 7, minute: 59)
+    let now = weeklyExpiry.addingTimeInterval(-15 * 86400)
+    func text(_ resets: AvailableResets) -> String? {
+      QuotaPresentation.availableResetsText(resets, mode: .absolute, now: now, timeFormat: .hour12)
+    }
+    let mixed = AvailableResets(
+      count: 4, listedCount: 4, earliestListedExpiry: weeklyExpiry, weeklyCount: 1,
+      weeklyEarliestExpiry: weeklyExpiry, otherEarliestExpiry: otherExpiry)
+    XCTAssertEqual(text(mixed), "4 resets · 1 weekly · Use by Dec 10, 10:00 PM")
+    let details = try XCTUnwrap(
+      QuotaPresentation.availableResetsDetails(mixed, now: now, timeFormat: .hour12))
+    XCTAssertTrue(details.hasPrefix("4 banked resets held."))
+    XCTAssertTrue(
+      details.contains("1 restores the weekly quota, earliest expiry Dec 10, 2030 at 10:00 PM."))
+    XCTAssertTrue(
+      details.contains("3 restore other limits only, earliest expiry Mar 9, 2031 at 7:59 AM."))
+    // The other group can expire first; the panel date then follows it and the groups keep theirs.
+    let otherFirst = AvailableResets(
+      count: 4, listedCount: 4, earliestListedExpiry: weeklyExpiry, weeklyCount: 1,
+      weeklyEarliestExpiry: otherExpiry, otherEarliestExpiry: weeklyExpiry)
+    let otherFirstDetails = try XCTUnwrap(
+      QuotaPresentation.availableResetsDetails(otherFirst, now: now, timeFormat: .hour12))
+    XCTAssertTrue(
+      otherFirstDetails.contains(
+        "1 restores the weekly quota, earliest expiry Mar 9, 2031 at 7:59 AM."))
+    XCTAssertTrue(
+      otherFirstDetails.contains(
+        "3 restore other limits only, earliest expiry Dec 10, 2030 at 10:00 PM."))
+
+    let allWeekly = AvailableResets(
+      count: 2, listedCount: 2, earliestListedExpiry: weeklyExpiry, weeklyCount: 2,
+      weeklyEarliestExpiry: weeklyExpiry)
+    XCTAssertEqual(text(allWeekly), "2 resets · Use by Dec 10, 10:00 PM")
+    let noneWeekly = AvailableResets(
+      count: 3, listedCount: 3, earliestListedExpiry: weeklyExpiry, weeklyCount: 0)
+    XCTAssertEqual(text(noneWeekly), "3 resets · 0 weekly · Use by Dec 10, 10:00 PM")
+    XCTAssertTrue(
+      try XCTUnwrap(
+        QuotaPresentation.availableResetsDetails(noneWeekly, now: now, timeFormat: .hour12)
+      ).contains("None restores the weekly quota shown here."))
   }
 }

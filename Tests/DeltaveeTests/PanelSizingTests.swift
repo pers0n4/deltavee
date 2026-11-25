@@ -51,8 +51,9 @@ final class PanelSizingTests: XCTestCase {
     }
   }
 
-  /// The banked-reset line fits one line at panel width with a two-digit count and listed subset, for
-  /// every month, the widest clock time, and every display mode and time format.
+  /// The banked-reset line fits one line at panel width with two-digit counts, for Codex's listed
+  /// subset and Claude's weekly subset, every month, the widest clock time, and every display mode and
+  /// time format.
   @MainActor
   func testAvailableResetsLineFitsOneLineAtPanelWidth() throws {
     _ = NSApplication.shared
@@ -62,17 +63,23 @@ final class PanelSizingTests: XCTestCase {
       let expiry = try XCTUnwrap(
         calendar.date(from: DateComponents(year: 2026, month: month, day: 28, hour: 23, minute: 58))
       )
-      let resets = AvailableResets(count: 99, listedCount: 88, earliestListedExpiry: expiry)
+      let codex = AvailableResets(count: 99, listedCount: 88, earliestListedExpiry: expiry)
+      let claude = AvailableResets(
+        count: 99, listedCount: 99, earliestListedExpiry: expiry, weeklyCount: 88,
+        weeklyEarliestExpiry: expiry)
       // Just under 30 days out gives the longest countdown, `Expires in 29d 23h 59m`.
       let now = expiry.addingTimeInterval(-(30 * 86400 - 61))
-      for mode in [TimeDisplayMode.absolute, .relative] {
-        for format in TimeFormat.allCases {
-          let line = AvailableResetsLine(
-            resets: resets, now: now, resetTimeMode: mode, timeFormat: format)
-          let width = NSHostingView(rootView: line.fixedSize()).fittingSize.width
-          XCTAssertGreaterThan(width, 0)
-          XCTAssertLessThanOrEqual(
-            width, available, "Resets line for month \(month), \(mode)/\(format) needs \(width)pt")
+      for resets in [codex, claude] {
+        for mode in [TimeDisplayMode.absolute, .relative] {
+          for format in TimeFormat.allCases {
+            let line = AvailableResetsLine(
+              resets: resets, now: now, resetTimeMode: mode, timeFormat: format)
+            let width = NSHostingView(rootView: line.fixedSize()).fittingSize.width
+            XCTAssertGreaterThan(width, 0)
+            XCTAssertLessThanOrEqual(
+              width, available, "Resets line for month \(month), \(mode)/\(format) needs \(width)pt"
+            )
+          }
         }
       }
     }

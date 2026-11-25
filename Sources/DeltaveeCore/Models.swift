@@ -141,21 +141,36 @@ public struct QuotaSnapshot: Codable, Equatable, Sendable {
   public func isStale(now: Date) -> Bool { now.timeIntervalSince(observedAt) > Self.staleAfter }
 }
 /// One-time usage-limit resets a provider keeps on the account until the user redeems them or they expire.
+/// The count is what the account holds, not what it can redeem right now: a provider may require a limit
+/// to be reached, or other conditions, before a held reset can be used.
 public struct AvailableResets: Codable, Equatable, Sendable {
-  /// Resets the provider counts as available.
+  /// Resets the provider counts as held.
   public var count: Int
-  /// Available resets the response listed with details; nil when it sent only the count. The provider
+  /// Held resets the response listed with details; nil when it sent only the count. The provider
   /// may cap the list, so this can be less than `count`.
   public var listedCount: Int?
-  /// Earliest expiry among the listed available resets, which is not necessarily the earliest one the
+  /// Earliest expiry among the listed held resets, which is not necessarily the earliest one the
   /// account holds when the list is shorter than `count`. Nil when none listed has an expiry.
   public var earliestListedExpiry: Date?
-  public init(count: Int, listedCount: Int? = nil, earliestListedExpiry: Date? = nil) {
+  /// Held resets that restore the weekly quota Deltavee shows; nil when the provider does not say which
+  /// limits each reset restores.
+  public var weeklyCount: Int?
+  /// Earliest expiry among the resets in `weeklyCount`.
+  public var weeklyEarliestExpiry: Date?
+  /// Earliest expiry among the held resets outside `weeklyCount`, which restore other limits only.
+  public var otherEarliestExpiry: Date?
+  public init(
+    count: Int, listedCount: Int? = nil, earliestListedExpiry: Date? = nil, weeklyCount: Int? = nil,
+    weeklyEarliestExpiry: Date? = nil, otherEarliestExpiry: Date? = nil
+  ) {
     self.count = count
     self.listedCount = listedCount
     self.earliestListedExpiry = earliestListedExpiry
+    self.weeklyCount = weeklyCount
+    self.weeklyEarliestExpiry = weeklyEarliestExpiry
+    self.otherEarliestExpiry = otherEarliestExpiry
   }
-  /// Whether the listed resets cover every available one, so the earliest listed expiry is the earliest held.
+  /// Whether the listed resets cover every held one, so the earliest listed expiry is the earliest held.
   public var listsAll: Bool { listedCount.map { $0 >= count } ?? false }
 }
 public enum FailureKind: Codable, Equatable, Sendable {

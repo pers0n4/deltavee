@@ -53,25 +53,30 @@ private actor FakeCredentials: CredentialReading {
   var count = 0
   let expiry: Date
   let variable: ClaudeConfigDirVariable
-  init(expiry: Date, variable: ClaudeConfigDirVariable = .set) {
+  let scopes: [String]?
+  init(expiry: Date, variable: ClaudeConfigDirVariable = .set, scopes: [String]? = nil) {
     self.expiry = expiry
     self.variable = variable
+    self.scopes = scopes
   }
   func read(configDir: String) async throws -> OAuthCredential {
     count += 1
     return OAuthCredential(
-      accessToken: "fake-test-token", expiresAt: expiry, configDirVariable: variable)
+      accessToken: "fake-test-token", expiresAt: expiry, configDirVariable: variable,
+      scopes: scopes)
   }
 }
 private actor FakeHTTP: UsageHTTPTransport {
   var count = 0
   var validHeaders = false
+  var url: URL?
   let response: HTTPResult
   init(status: Int = 200, body: Data = Data(), retryAfter: String? = nil) {
     response = HTTPResult(status: status, body: body, retryAfter: retryAfter)
   }
   func send(_ request: URLRequest) async throws -> HTTPResult {
     count += 1
+    url = request.url
     validHeaders =
       request.httpMethod == "GET"
       && request.url?.absoluteString == "https://api.anthropic.com/api/oauth/usage"
@@ -649,5 +654,114 @@ final class ClaudeCollectorTests: CoreTestCase {
     XCTAssertEqual(cached, "2.3.4")
     let counts = await [failing.count, malformed.count, succeeding.count, later.count]
     XCTAssertEqual(counts, [1, 1, 1, 0])
+  }
+  private func grant(
+    left: String = "1", paused: String = "false", ends: String, clears: [String],
+    extra: String = ""
+  ) -> String {
+    let list = clears.map { "\"\($0)\"" }.joined(separator: ",")
+    return
+      "{\"id\":\"fake\",\"resets_total\":1,\"resets_left\":\(left),\"paused\":\(paused),\"ends_at\":\(ends),\"clears\":[\(list)],\"type\":\"full\"\(extra)}"
+  }
+  private func usage(cedarEmber: String) -> Data {
+    Data(
+      "{\"seven_day\":{\"utilization\":37,\"resets_at\":\"2030-03-20T11:00:00Z\"},\"cedar_ember\":\(cedarEmber)}"
+        .utf8)
+  }
+  /// Counts what the account holds, as Claude Code does: a reset gated on reaching a limit or not yet
+  /// started still counts, while paused, used-up, expired, and malformed grants do not. Only grants
+  /// whose `clears` lists `seven_day` count as restoring the weekly quota, whatever their `type`.
+  func testCedarEmberCountsHeldResetsAndWeeklySubset() throws {
+    let weekly = ["seven_day", "seven_day_overage_included"]
+    let fable = ["five_hour", "seven_day_overage_included"]
+    let grants = [
+      grant(ends: "\"2030-04-10T22:00:00+00:00\"", clears: weekly),
+      grant(left: "2", ends: "\"2030-07-09T07:59:00+00:00\"", clears: fable),
+      grant(
+        ends: "\"2030-05-01T00:00:00+00:00\"", clears: ["seven_day"],
+        extra:
+          ",\"usable_now\":false,\"use_requires_limit\":true,\"starts_at\":\"2030-04-01T00:00:00Z\""
+      ),
+      grant(ends: "null", clears: ["five_hour"]),
+      grant(paused: "true", ends: "\"2030-04-02T00:00:00Z\"", clears: weekly),
+      grant(left: "0", ends: "\"2030-04-02T00:00:00Z\"", clears: weekly),
+      grant(ends: "\"2030-03-01T00:00:00Z\"", clears: weekly),
+      grant(paused: "null", ends: "\"2030-04-02T00:00:00Z\"", clears: weekly),
+      grant(ends: "\"not a date\"", clears: weekly),
+    ].joined(separator: ",")
+    let value = try ClaudeUsageCollector.parse(
+      usage(cedarEmber: "{\"eligible\":true,\"grants\":[\(grants)]}"), now: now)
+    XCTAssertEqual(value.weeklyUsedPercent, 37)
+    XCTAssertEqual(
+      value.availableResets,
+      AvailableResets(
+        count: 5, listedCount: 5,
+        earliestListedExpiry: try XCTUnwrap(Parsing.isoDate("2030-04-10T22:00:00Z")),
+        weeklyCount: 2,
+        weeklyEarliestExpiry: try XCTUnwrap(Parsing.isoDate("2030-04-10T22:00:00Z")),
+        otherEarliestExpiry: try XCTUnwrap(Parsing.isoDate("2030-07-09T07:59:00Z"))))
+  }
+  /// Each group keeps its own earliest expiry whichever group expires first.
+  func testCedarEmberKeepsEachGroupsEarliestExpiryInEitherOrder() throws {
+    let early = "2030-04-01T00:00:00Z"
+    let late = "2030-06-01T00:00:00Z"
+    for (weeklyEnd, otherEnd) in [(early, late), (late, early)] {
+      let grants = [
+        grant(ends: "\"\(otherEnd)\"", clears: ["seven_day_overage_included"]),
+        grant(ends: "\"\(weeklyEnd)\"", clears: ["seven_day"]),
+      ].joined(separator: ",")
+      let resets = try XCTUnwrap(
+        ClaudeUsageCollector.parse(
+          usage(cedarEmber: "{\"eligible\":true,\"grants\":[\(grants)]}"), now: now
+        ).availableResets)
+      XCTAssertEqual(resets.earliestListedExpiry, Parsing.isoDate(early))
+      XCTAssertEqual(resets.weeklyEarliestExpiry, Parsing.isoDate(weeklyEnd))
+      XCTAssertEqual(resets.otherEarliestExpiry, Parsing.isoDate(otherEnd))
+    }
+  }
+  func testIneligibleMissingOrMalformedCedarEmberIsUnknownWithoutFailingQuota() throws {
+    for block in [
+      "null", "[]", "{\"eligible\":false,\"ineligible_reason\":\"cli_version\",\"grants\":[]}",
+      "{\"eligible\":true}", "{\"eligible\":\"true\",\"grants\":[]}",
+    ] {
+      let value = try ClaudeUsageCollector.parse(usage(cedarEmber: block), now: now)
+      XCTAssertEqual(value.weeklyUsedPercent, 37, block)
+      XCTAssertNil(value.availableResets, block)
+    }
+    XCTAssertNil(try ClaudeUsageCollector.parse(fixture("claude"), now: now).availableResets)
+    XCTAssertEqual(
+      try ClaudeUsageCollector.parse(
+        usage(cedarEmber: "{\"eligible\":true,\"grants\":[]}"), now: now
+      )
+      .availableResets,
+      AvailableResets(count: 0, listedCount: 0, weeklyCount: 0))
+  }
+  /// Claude Code asks for resets only with the `user:profile` scope; a token without it, or one whose
+  /// scopes are unknown, keeps the plain usage request.
+  func testResetReadIsRequestedOnlyWithProfileScope() async throws {
+    let stored = Data(
+      #"{"claudeAiOauth":{"accessToken":"fake-test-token","expiresAt":1900010000000,"scopes":["user:inference","user:profile"]}}"#
+        .utf8)
+    XCTAssertEqual(
+      try ClaudeCredentialReader.parse(stored, configDirVariable: .set).scopes,
+      ["user:inference", "user:profile"])
+    for (scopes, query) in [
+      (nil, nil), (["user:inference"], nil),
+      (["user:inference", "user:profile"], "cedar_ember=1&skip_spend=1"),
+    ] as [([String]?, String?)] {
+      let http = FakeHTTP(
+        body: usage(
+          cedarEmber:
+            "{\"eligible\":true,\"grants\":[\(grant(ends: "null", clears: ["seven_day"]))]}"))
+      let result = await collector(
+        credentials: FakeCredentials(expiry: now.addingTimeInterval(3600), scopes: scopes),
+        http: http
+      ).fetch(account())
+      let url = await http.url
+      XCTAssertEqual(url?.path, "/api/oauth/usage")
+      XCTAssertEqual(url?.query, query, "\(String(describing: scopes))")
+      guard case .success(let usage) = result else { return XCTFail("Expected success") }
+      XCTAssertEqual(usage.snapshot.availableResets?.count, 1)
+    }
   }
 }

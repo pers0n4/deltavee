@@ -152,23 +152,27 @@ enum QuotaPresentation {
   }
 
   /// Panel line for banked resets, e.g. `3 resets · Use by Dec 1, 5:22 AM`. Nil when there are none.
-  /// When the response listed fewer resets than it counted, the expiry is the earliest listed one and
-  /// the line says how many were listed. Once that expiry passes, the count is only what the last read
-  /// reported, so the line says so instead of calling the resets available.
+  /// When only some of the resets restore the weekly quota, the line says how many do, as in
+  /// `4 resets · 1 weekly · Use by …`. When the response listed fewer resets than it counted, the expiry
+  /// is the earliest listed one and the line says how many were listed. Once that expiry passes, the
+  /// count is only what the last read reported, so the line says so instead of calling the resets held.
   static func availableResetsText(
     _ resets: AvailableResets, mode: TimeDisplayMode, now: Date, timeFormat: TimeFormat
   ) -> String? {
     guard resets.count > 0 else { return nil }
-    let count = "\(resets.count) \(resets.count == 1 ? "reset" : "resets")"
-    guard let expiry = resets.earliestListedExpiry else { return "\(count) available" }
+    var parts = ["\(resets.count) \(resets.count == 1 ? "reset" : "resets")"]
+    if let weekly = resets.weeklyCount, weekly != resets.count { parts.append("\(weekly) weekly") }
+    guard let expiry = resets.earliestListedExpiry else {
+      return parts.count == 1 ? "\(parts[0]) held" : parts.joined(separator: " · ")
+    }
     guard expiry > now else { return "Last reported: \(resets.count) · Expiry passed" }
-    let due =
-      mode == .absolute
-      ? "Use by \(dateText(expiry, compact: true, timeFormat: timeFormat))"
-      : countdown(expiry, now: now, prefix: "Expires in ")
     // The expiry covers only the listed resets, so say how many those were.
-    guard !resets.listsAll, let listed = resets.listedCount else { return "\(count) · \(due)" }
-    return "\(count) · \(listed) listed · \(due)"
+    if let listed = resets.listedCount, !resets.listsAll { parts.append("\(listed) listed") }
+    parts.append(
+      mode == .absolute
+        ? "Use by \(dateText(expiry, compact: true, timeFormat: timeFormat))"
+        : countdown(expiry, now: now, prefix: "Expires in "))
+    return parts.joined(separator: " · ")
   }
 
   /// Full description for the tooltip and VoiceOver. Nil when there are no resets.
@@ -181,16 +185,34 @@ enum QuotaPresentation {
     var text =
       elapsed
       ? "Last read reported \(resets.count) \(noun); refresh to see what remains."
-      : "\(resets.count) \(noun) available."
+      : "\(resets.count) \(noun) held."
     let partial = !resets.listsAll
     if let listed = resets.listedCount, partial { text += " \(listed) listed." }
-    guard let expiry = resets.earliestListedExpiry else { return text }
-    let date = dateText(expiry, compact: false, timeFormat: timeFormat)
-    text +=
-      expiry > now
-      ? " \(partial ? "Earliest listed expiry" : "Earliest expiry"): \(date)."
-      : " \(partial ? "Earliest listed reset" : "Earliest reset") expired \(date)."
-    if partial { text += " Unlisted resets may expire sooner." }
+    if let expiry = resets.earliestListedExpiry {
+      let date = dateText(expiry, compact: false, timeFormat: timeFormat)
+      text +=
+        expiry > now
+        ? " \(partial ? "Earliest listed expiry" : "Earliest expiry"): \(date)."
+        : " \(partial ? "Earliest listed reset" : "Earliest reset") expired \(date)."
+      if partial { text += " Unlisted resets may expire sooner." }
+    }
+    if let weekly = resets.weeklyCount, !elapsed {
+      let others = resets.count - weekly
+      func expiry(_ date: Date?) -> String {
+        date.map { ", earliest expiry \(dateText($0, compact: false, timeFormat: timeFormat))." }
+          ?? "."
+      }
+      if weekly == 0 {
+        text += " None restores the weekly quota shown here."
+      } else {
+        text += " \(weekly) \(weekly == 1 ? "restores" : "restore") the weekly quota"
+        text += expiry(resets.weeklyEarliestExpiry)
+        if others > 0 {
+          text += " \(others) \(others == 1 ? "restores" : "restore") other limits only"
+          text += expiry(resets.otherEarliestExpiry)
+        }
+      }
+    }
     return text
   }
 

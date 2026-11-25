@@ -5,10 +5,16 @@ public struct OAuthCredential: Sendable {
   public let expiresAt: Date
   /// How the CLI was run when it stored this login; a refresh run and `.claude.json` must match it.
   public let configDirVariable: ClaudeConfigDirVariable
-  public init(accessToken: String, expiresAt: Date, configDirVariable: ClaudeConfigDirVariable) {
+  /// OAuth scopes stored with the token; nil when the credential does not list them.
+  public let scopes: [String]?
+  public init(
+    accessToken: String, expiresAt: Date, configDirVariable: ClaudeConfigDirVariable,
+    scopes: [String]? = nil
+  ) {
     self.accessToken = accessToken
     self.expiresAt = expiresAt
     self.configDirVariable = configDirVariable
+    self.scopes = scopes
   }
 }
 public protocol CredentialReading: Sendable {
@@ -55,7 +61,7 @@ public struct ClaudeCredentialReader: CredentialReading {
     return OAuthCredential(
       accessToken: token,
       expiresAt: Date(timeIntervalSince1970: expires.timeIntervalSince1970 / 1000),
-      configDirVariable: configDirVariable)
+      configDirVariable: configDirVariable, scopes: oauth["scopes"] as? [String])
   }
 }
 public struct HTTPResult: Sendable {
@@ -420,7 +426,7 @@ public struct ClaudeUsageCollector: Collector {
       // Unofficial endpoint that Claude Code reads its own usage from. The path, the `oauth-2025-04-20`
       // beta value, and the `claude-cli/<version> (external, <entrypoint>)` User-Agent format were found
       // in the Claude Code 2.1.322 binary on 2026-11-15; the CLI's actual header set was not captured.
-      var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
+      var request = URLRequest(url: Self.usageURL(credential))
       request.httpMethod = "GET"
       request.setValue("Bearer " + credential.accessToken, forHTTPHeaderField: "Authorization")
       request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -472,9 +478,10 @@ public struct ClaudeUsageCollector: Collector {
     return now.addingTimeInterval(min(maximumRetryAfter, max(0, delay)))
   }
   public static func parse(_ data: Data, now: Date) throws -> QuotaSnapshot {
-    // Only the `seven_day` key is read. Verified 2026-11-15 against two Claude accounts (Claude Code
-    // 2.1.322): `seven_day` is present, while `five_hour`, `seven_day_sonnet`, and `seven_day_opus`
-    // are null. These observations do not establish the response shape for every account.
+    // Of the usage windows only `seven_day` is read; `cedar_ember` adds held resets. Verified 2026-11-15
+    // against two Claude accounts (Claude Code 2.1.322): `seven_day` is present, while `five_hour`,
+    // `seven_day_sonnet`, and `seven_day_opus` are null. These observations do not establish the
+    // response shape for every account.
     guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let raw = root["seven_day"]
     else { throw CollectError(.schema) }
@@ -486,6 +493,57 @@ public struct ClaudeUsageCollector: Collector {
     }
     return QuotaSnapshot(
       weeklyUsedPercent: weekly?.used, weeklyResetsAt: weekly?.resetsAt, observedAt: now,
-      fetchedAt: now, source: .claudeOAuth)
+      fetchedAt: now, source: .claudeOAuth,
+      availableResets: availableResets(root["cedar_ember"], now: now))
+  }
+  /// Adds Claude Code's banked-reset read to the usage request when the token has the scope Claude Code
+  /// requires for it. Claude Code 2.1.331 (binary inspected 2026-11-24) sends
+  /// `/api/oauth/usage?cedar_ember=1&skip_spend=1` only for tokens with `user:profile`. A live read that
+  /// day returned `seven_day` and `cedar_ember` in the same reply, so this stays one request. `skip_spend`
+  /// drops spend fields that Deltavee does not read. Without the parameter `cedar_ember` is null
+  /// (https://github.com/shuv1337/shuvquota/blob/master/docs/claude-limit-resets.md).
+  static func usageURL(_ credential: OAuthCredential) -> URL {
+    let base = "https://api.anthropic.com/api/oauth/usage"
+    let reads = credential.scopes?.contains("user:profile") ?? false
+    return URL(string: reads ? base + "?cedar_ember=1&skip_spend=1" : base)!
+  }
+  /// Reads held resets from `cedar_ember`, counting them as Claude Code 2.1.331 does when it decides an
+  /// account holds an unused reset (binary inspected 2026-11-24): `eligible` is true and a grant has
+  /// `resets_left > 0`, is not `paused`, and has not reached `ends_at`. `usable_now`, `starts_at`, and
+  /// `cooldown_until` describe when a reset can be redeemed, not whether it is held, so they are not read.
+  /// A grant restores the weekly quota when its `clears` lists `seven_day`, the window Deltavee shows; a
+  /// live grant with `type: weekly` and a sample with `type: full` both did
+  /// (https://github.com/steipete/CodexBar/issues/5073), so `type` is not read. A malformed grant is
+  /// skipped, as Claude Code does. A missing block, `eligible: false` (also returned for an outdated
+  /// `claude-cli` User-Agent version), or a malformed block leaves resets unknown.
+  static func availableResets(_ value: Any?, now: Date) -> AvailableResets? {
+    guard let status = value as? [String: Any], status["eligible"] as? Bool == true,
+      let grants = status["grants"] as? [Any]
+    else { return nil }
+    var count = 0
+    var weekly = 0
+    var earliest: Date?
+    var weeklyEarliest: Date?
+    var otherEarliest: Date?
+    for case let grant as [String: Any] in grants {
+      guard let left = Parsing.count(grant["resets_left"]), let paused = grant["paused"] as? Bool,
+        let clears = grant["clears"] as? [String]
+      else { continue }
+      let rawEnd = grant["ends_at"]
+      let end = Parsing.isoDate(rawEnd)
+      guard rawEnd == nil || rawEnd is NSNull || end != nil else { continue }
+      guard left > 0, !paused, end.map({ $0 > now }) ?? true else { continue }
+      count += left
+      if let end { earliest = min(earliest ?? end, end) }
+      if clears.contains("seven_day") {
+        weekly += left
+        if let end { weeklyEarliest = min(weeklyEarliest ?? end, end) }
+      } else if let end {
+        otherEarliest = min(otherEarliest ?? end, end)
+      }
+    }
+    return AvailableResets(
+      count: count, listedCount: count, earliestListedExpiry: earliest, weeklyCount: weekly,
+      weeklyEarliestExpiry: weeklyEarliest, otherEarliestExpiry: otherEarliest)
   }
 }

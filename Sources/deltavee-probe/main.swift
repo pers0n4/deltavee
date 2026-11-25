@@ -37,7 +37,8 @@ func describe(_ snapshot: QuotaSnapshot) -> String {
   let resets = snapshot.availableResets.map { value in
     let listed = value.listedCount.map(String.init) ?? "-"
     let expiry = value.earliestListedExpiry.map { formatter.string(from: $0) } ?? "-"
-    return "\(value.count) listed=\(listed) earliestListedExpiry=\(expiry)"
+    let restoresWeekly = value.weeklyCount.map(String.init) ?? "-"
+    return "\(value.count) listed=\(listed) weekly=\(restoresWeekly) earliestListedExpiry=\(expiry)"
   }
   return
     "weekly=\(weekly) resetsAt=\(reset) resets=\(resets ?? "unknown") observedAt=\(formatter.string(from: snapshot.observedAt)) source=\(snapshot.source.rawValue) identity=\(snapshot.identityFingerprint == nil ? "absent" : "present")"
